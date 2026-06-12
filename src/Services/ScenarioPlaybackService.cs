@@ -214,25 +214,29 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
 
                 try
                 {
+                    var throwerBotPawn = _botAssignments.Count > 0 
+                        ? _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.Slot == _botAssignments.Keys.First())?.PlayerPawn 
+                        : null;
+
                     if (grenade.GrenadeType == "flashbang_projectile")
                     {
-                        SwiftlyS2.Shared.SchemaDefinitions.CFlashbangProjectile.EmitGrenade(pos, ang, vel, null);
+                        SwiftlyS2.Shared.SchemaDefinitions.CFlashbangProjectile.EmitGrenade(pos, ang, vel, throwerBotPawn);
                     }
                     else if (grenade.GrenadeType == "hegrenade_projectile")
                     {
-                        SwiftlyS2.Shared.SchemaDefinitions.CHEGrenadeProjectile.EmitGrenade(pos, ang, vel, null);
+                        SwiftlyS2.Shared.SchemaDefinitions.CHEGrenadeProjectile.EmitGrenade(pos, ang, vel, throwerBotPawn);
                     }
                     else if (grenade.GrenadeType == "smokegrenade_projectile")
                     {
-                        SwiftlyS2.Shared.SchemaDefinitions.CSmokeGrenadeProjectile.EmitGrenade(pos, ang, vel, (SwiftlyS2.Shared.Players.Team)2, null);
+                        SwiftlyS2.Shared.SchemaDefinitions.CSmokeGrenadeProjectile.EmitGrenade(pos, ang, vel, (SwiftlyS2.Shared.Players.Team)2, throwerBotPawn);
                     }
                     else if (grenade.GrenadeType == "molotov_projectile")
                     {
-                        SwiftlyS2.Shared.SchemaDefinitions.CMolotovProjectile.EmitGrenade(pos, ang, vel, (SwiftlyS2.Shared.Players.Team)2, null);
+                        SwiftlyS2.Shared.SchemaDefinitions.CMolotovProjectile.EmitGrenade(pos, ang, vel, (SwiftlyS2.Shared.Players.Team)2, throwerBotPawn);
                     }
                     else if (grenade.GrenadeType == "decoy_projectile")
                     {
-                        SwiftlyS2.Shared.SchemaDefinitions.CDecoyProjectile.EmitGrenade(pos, ang, vel, null);
+                        SwiftlyS2.Shared.SchemaDefinitions.CDecoyProjectile.EmitGrenade(pos, ang, vel, throwerBotPawn);
                     }
                 }
                 catch (Exception ex)

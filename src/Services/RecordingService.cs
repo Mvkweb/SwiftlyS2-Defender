@@ -117,11 +117,12 @@ public sealed class RecordingService : IRecordingService
         if (_wipScenario == null || !_wipScenario.Anchor.IsSet) return;
         _state.SetRecordingState(true);
         _isRecordingGrenade = true;
+        _recordingStartTimeMs = Environment.TickCount64;
         // Start counting the ticks/frames offset for the grenade
         _activeBot = new ScenarioBot { Loadout = grenadeType };
         _activeBot.Frames.Clear(); 
         // We use activeBot temporarily just to track the time offset since recording started.
-        // The actual throw will be logged by LogGrenadeThrow.
+        // The actual throw will be logged by LogProjectileSpawned.
         _logger.LogInformation("Recording grenade throw...");
     }
 
@@ -129,7 +130,11 @@ public sealed class RecordingService : IRecordingService
     {
         if (!_state.IsRecording || _activeBot == null || _wipScenario == null) return;
         
-        long timeOffset = _activeBot.Frames.Count > 0 ? _activeBot.Frames.Last().TimeOffsetMs : 0;
+        long timeOffset;
+        if (_isRecordingGrenade && _activeBot.Frames.Count == 0)
+            timeOffset = Environment.TickCount64 - _recordingStartTimeMs;
+        else
+            timeOffset = _activeBot.Frames.Count > 0 ? _activeBot.Frames.Last().TimeOffsetMs : Environment.TickCount64 - _recordingStartTimeMs;
         
         _wipScenario.Grenades.Add(new ScenarioGrenade
         {
