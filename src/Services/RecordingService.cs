@@ -1,0 +1,203 @@
+using Microsoft.Extensions.Logging;
+using SwiftlyS2.Shared;
+using SwiftlyS2_Defender.Interfaces;
+using SwiftlyS2_Defender.Models;
+using System.Linq;
+using SwiftlyS2.Shared;
+using SwiftlyS2.Shared.Players;
+using SwiftlyS2.Shared.Natives;
+
+namespace SwiftlyS2_Defender.Services;
+
+public sealed class RecordingService : IRecordingService
+{
+    private readonly ISwiftlyCore _core;
+    private readonly ILogger _logger;
+    private readonly IDefenderStateService _state;
+    private readonly IScenarioPlaybackService _playback;
+    private readonly IDefenderConfigService _config;
+    private readonly IScenarioVisualizationService _vis;
+
+    private Scenario? _wipScenario;
+    private ScenarioBot? _activeBot;
+    private long _recordingStartTimeMs;
+    private ulong _recordingPlayerId;
+    
+    private bool _isCountingDown;
+    private long _lastFrameMs;
+    private const int FrameIntervalMs = 0; // Record every tick for perfect smoothness
+
+    private Vector? _lastPlayerPos;
+    private long _lastMoveTimeMs;
+
+    public RecordingService(ISwiftlyCore core, ILogger logger, IDefenderStateService state, IScenarioPlaybackService playback, IDefenderConfigService config, IScenarioVisualizationService vis)
+    {
+        _core = core;
+        _logger = logger;
+        _state = state;
+        _playback = playback;
+        _config = config;
+        _vis = vis;
+
+        _core.Event.OnTick += OnTick;
+    }
+
+    public void SetupScenario(string name)
+    {
+        _wipScenario = new Scenario { Name = name };
+        _logger.LogInformation("Creating new scenario: {Name}", name);
+    }
+
+    public void SetPlayerAnchor(ulong steamId)
+    {
+        if (_wipScenario == null) return;
+        var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+        if (player == null || !player.IsValid || player.PlayerPawn == null) return;
+
+        var origin = player.PlayerPawn.CBodyComponent?.SceneNode?.AbsOrigin;
+        var viewAngles = player.PlayerPawn.EyeAngles;
+
+        if (origin == null) return;
+
+        _wipScenario.Anchor = new ScenarioAnchor
+        {
+            X = origin.Value.X,
+            Y = origin.Value.Y,
+            Z = origin.Value.Z,
+            Pitch = viewAngles.X,
+            Yaw = viewAngles.Y
+        };
+        
+        _logger.LogInformation("Anchor set.");
+    }
+
+    public void StartRecordingBot(ulong steamId)
+    {
+        if (_wipScenario == null) return;
+        _recordingPlayerId = steamId;
+        _activeBot = new ScenarioBot();
+        _isCountingDown = true;
+        _state.SetRecordingState(true);
+
+        var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+        if (player != null)
+        {
+            _core.Scheduler.DelayBySeconds(1.0f, () => player.SendMessage(MessageType.Chat, "3..."));
+            _core.Scheduler.DelayBySeconds(2.0f, () => player.SendMessage(MessageType.Chat, "2..."));
+            _core.Scheduler.DelayBySeconds(3.0f, () => player.SendMessage(MessageType.Chat, "1..."));
+            _core.Scheduler.DelayBySeconds(4.0f, () => 
+            {
+                player.SendMessage(MessageType.Chat, "GO!");
+                _isCountingDown = false;
+                _recordingStartTimeMs = Environment.TickCount64;
+                _lastMoveTimeMs = _recordingStartTimeMs;
+                _lastPlayerPos = null;
+                _playback.PlayScenario(_wipScenario, false); 
+            });
+        }
+    }
+
+    public void StartRecordingGrenade(ulong steamId, string grenadeType)
+    {
+        // For brevity, we assume the grenade logic uses the same countdown, but instead of tracking ticks,
+        // we hook EventWeaponFire/GrenadeThrown.
+        // I will implement this as a mock for now and flesh it out in the handler.
+    }
+
+    public void StopRecording(ulong steamId)
+    {
+        if (!_state.IsRecording || _activeBot == null) return;
+
+        _wipScenario?.Bots.Add(_activeBot);
+        
+        _logger.LogInformation("Recording stopped. Recorded {Count} frames.", _activeBot.Frames.Count);
+        if (_wipScenario != null)
+        {
+            _vis.DrawScenario(_wipScenario);
+        }
+        _activeBot = null;
+        
+        _state.SetRecordingState(false);
+        _playback.StopScenario();
+        _core.Engine.ExecuteCommand("bot_kick");
+        _core.Engine.ExecuteCommand("bot_quota 0");
+        
+        var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+        if (player != null) player.SendMessage(MessageType.Chat, "Recording stopped and saved to scenario.");
+    }
+
+    public void ClearLastElement()
+    {
+        if (_wipScenario == null) return;
+        if (_wipScenario.Bots.Count > 0)
+        {
+            _wipScenario.Bots.RemoveAt(_wipScenario.Bots.Count - 1);
+        }
+    }
+
+    public void SaveScenario()
+    {
+        if (_wipScenario == null) return;
+        _config.SaveScenario(_wipScenario);
+        _wipScenario = null;
+    }
+
+    public Scenario? GetWipScenario() => _wipScenario;
+
+    private void OnTick()
+    {
+        if (!_state.IsRecording || _isCountingDown || _activeBot == null) return;
+
+        var nowMs = Environment.TickCount64;
+        if (nowMs - _lastFrameMs >= FrameIntervalMs)
+        {
+            _lastFrameMs = nowMs;
+            var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == _recordingPlayerId);
+            if (player == null || !player.IsValid || player.PlayerPawn == null || player.Controller == null || !player.Controller.PawnIsAlive)
+            {
+                StopRecording(_recordingPlayerId);
+                return;
+            }
+
+            var origin = player.PlayerPawn.CBodyComponent?.SceneNode?.AbsOrigin;
+            var viewAngle = player.PlayerPawn.EyeAngles;
+
+            if (origin == null) return;
+
+            if (_lastPlayerPos != null && _lastPlayerPos.HasValue)
+            {
+                var dx = origin.Value.X - _lastPlayerPos.Value.X;
+                var dy = origin.Value.Y - _lastPlayerPos.Value.Y;
+                var dz = origin.Value.Z - _lastPlayerPos.Value.Z;
+                var distSq = dx * dx + dy * dy + dz * dz;
+
+                if (distSq > 0.1f) // Player moved
+                {
+                    _lastMoveTimeMs = nowMs;
+                    _lastPlayerPos = origin.Value;
+                }
+                else if (nowMs - _lastMoveTimeMs > 2000) // 2 seconds of inactivity
+                {
+                    player.SendMessage(MessageType.Chat, "[green][Defender][white] Auto-stopped recording due to inactivity.");
+                    StopRecording(_recordingPlayerId);
+                    return;
+                }
+            }
+            else
+            {
+                _lastPlayerPos = origin.Value;
+                _lastMoveTimeMs = nowMs;
+            }
+
+            _activeBot.Frames.Add(new BotFrame
+            {
+                TimeOffsetMs = nowMs - _recordingStartTimeMs,
+                X = origin.Value.X,
+                Y = origin.Value.Y,
+                Z = origin.Value.Z,
+                Pitch = viewAngle.X,
+                Yaw = viewAngle.Y
+            });
+        }
+    }
+}

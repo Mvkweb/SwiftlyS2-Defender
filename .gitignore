@@ -1,0 +1,23 @@
+# .NET Core
+bin/
+obj/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# IDE / Editor
+.vscode/
+.idea/
+.vs/
+*.swp
+*.*~
+project.lock.json
+.DS_Store
+
+# Publish and Release
+release-package/
+build/
