@@ -26,12 +26,12 @@ public class SwiftlyS2_Defender : BasePlugin
         _serviceProvider = ServiceProviderFactory.CreateServiceProvider(Core, Core.Logger);
 
         var roundManager = _serviceProvider.GetRequiredService<IRoundManagerService>();
-        _gameplayEventHandlers = new GameplayEventHandlers(roundManager);
+        var recording = _serviceProvider.GetRequiredService<IRecordingService>();
+        _gameplayEventHandlers = new GameplayEventHandlers(roundManager, recording);
         _gameplayEventHandlers.Register(Core);
 
         var state = _serviceProvider.GetRequiredService<IDefenderStateService>();
         var config = _serviceProvider.GetRequiredService<IDefenderConfigService>();
-        var recording = _serviceProvider.GetRequiredService<IRecordingService>();
         var playback = _serviceProvider.GetRequiredService<IScenarioPlaybackService>();
         var vis = _serviceProvider.GetRequiredService<IScenarioVisualizationService>();
 
@@ -45,6 +45,11 @@ public class SwiftlyS2_Defender : BasePlugin
         Core.Engine.ExecuteCommand("mp_warmup_start");
         Core.Engine.ExecuteCommand("bot_join_team T");
         Core.Engine.ExecuteCommand("bot_kick");
+
+        Core.Engine.ExecuteCommand("violence_hblood 0");
+        Core.Engine.ExecuteCommand("violence_ablood 0");
+        Core.Engine.ExecuteCommand("violence_hgibs 0");
+        Core.Engine.ExecuteCommand("violence_agibs 0");
 
         Core.Logger.LogInformation("Defender: plugin loaded successfully via DI.");
     }

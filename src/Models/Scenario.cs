@@ -7,6 +7,7 @@ public sealed class Scenario
     public string Name { get; set; } = string.Empty;
     public string MapName { get; set; } = string.Empty;
     public ScenarioAnchor Anchor { get; set; } = new();
+    public List<string> PlayerLoadout { get; set; } = new();
     public List<ScenarioBot> Bots { get; set; } = new();
     public List<ScenarioGrenade> Grenades { get; set; } = new();
 }
@@ -18,6 +19,7 @@ public sealed class ScenarioAnchor
     public float Z { get; set; }
     public float Pitch { get; set; }
     public float Yaw { get; set; }
+    public bool IsSet => X != 0 || Y != 0 || Z != 0;
 }
 
 public sealed class ScenarioBot

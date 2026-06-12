@@ -28,8 +28,11 @@ public sealed class CommandHandlers
         _vis = vis;
     }
 
+    private ISwiftlyCore? _core;
+
     public void Register(ISwiftlyCore core)
     {
+        _core = core;
         _commandGuids.Add(core.Command.RegisterCommand("setup", OnSetupScenario, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("set_player", OnSetPlayer, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("bot", OnRecordBot, registerRaw: true));
@@ -43,6 +46,11 @@ public sealed class CommandHandlers
         _commandGuids.Add(core.Command.RegisterCommand("test_scenario", OnTestScenario, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("prac", OnPracScenario, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("edit_mode", OnEditMode, registerRaw: true));
+
+        _commandGuids.Add(core.Command.RegisterCommand("gflash", OnGiveGrenade, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("gsmoke", OnGiveGrenade, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("gmolotov", OnGiveGrenade, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("ggrenade", OnGiveGrenade, registerRaw: true));
     }
 
     public void Unregister(ISwiftlyCore core)
@@ -136,12 +144,74 @@ public sealed class CommandHandlers
     {
         var player = context.Sender;
         if (player == null) return;
+
+        var available = _config.GetAvailableScenarios().ToList();
+
+        if (context.Args.Length > 0)
+        {
+            if (int.TryParse(context.Args[0], out int id) && id >= 0 && id < available.Count)
+            {
+                var nameToLoad = available[id];
+                var loaded = _config.LoadScenario(nameToLoad);
+                if (loaded != null)
+                {
+                    if (!loaded.Anchor.IsSet)
+                    {
+                        context.Reply("[red][Defender][white] Scenario has no anchor set!");
+                        return;
+                    }
+                    _vis.ClearVisualizations();
+                    _playback.PlayScenario(loaded);
+                    context.Reply($"[green][Defender][default] Testing scenario: {nameToLoad}...");
+                    return;
+                }
+            }
+            context.Reply($"[red][Defender][white] Invalid scenario ID. Type !test to see available scenarios.");
+            return;
+        }
+
         var scenario = _recording.GetWipScenario();
         if (scenario != null)
         {
+            if (!scenario.Anchor.IsSet)
+            {
+                context.Reply("[red][Defender][white] You must set a player anchor with [lightred]!set_player[white] before testing!");
+                return;
+            }
+
+            // Update loadout to current weapons
+            scenario.PlayerLoadout.Clear();
+            if (player.PlayerPawn?.WeaponServices != null)
+            {
+                foreach (var handle in player.PlayerPawn.WeaponServices.MyWeapons)
+                {
+                    var weapon = handle.Value;
+                    if (weapon != null && !string.IsNullOrEmpty(weapon.DesignerName))
+                    {
+                        scenario.PlayerLoadout.Add(weapon.DesignerName);
+                    }
+                }
+            }
+
             _vis.ClearVisualizations();
             _playback.PlayScenario(scenario);
             context.Reply("[green][Defender][default] Testing active scenario...");
+        }
+        else
+        {
+            if (available.Count == 0)
+            {
+                context.Reply("[red][Defender][white] No scenarios saved! Use !setup to create one.");
+            }
+            else
+            {
+                context.Reply("[green][Defender][white] No active scenario loaded. Available scenarios:");
+                for (int i = 0; i < available.Count; i++)
+                {
+                    context.Reply($"[green]{i}[white] - {available[i]}");
+                }
+                context.Reply("Type [lightred]!test <id>[white] to test one.");
+            }
         }
     }
 
@@ -149,15 +219,49 @@ public sealed class CommandHandlers
     {
         var player = context.Sender;
         if (player == null) return;
-        var name = string.Join(" ", context.Args);
-        if (string.IsNullOrWhiteSpace(name)) return;
+        
+        var available = _config.GetAvailableScenarios().ToList();
 
-        var scenario = _config.LoadScenario(name);
-        if (scenario != null)
+        if (context.Args.Length > 0)
         {
-            _vis.ClearVisualizations();
-            _playback.PlayScenario(scenario);
-            context.Reply($"[green][Defender][default] Playing scenario {name}...");
+            if (int.TryParse(context.Args[0], out int id) && id >= 0 && id < available.Count)
+            {
+                var nameToLoad = available[id];
+                var loaded = _config.LoadScenario(nameToLoad);
+                if (loaded != null)
+                {
+                    _vis.ClearVisualizations();
+                    _playback.PlayScenario(loaded);
+                    context.Reply($"[green][Defender][default] Playing scenario: {nameToLoad}...");
+                    return;
+                }
+            }
+            else
+            {
+                var name = string.Join(" ", context.Args);
+                var scenario = _config.LoadScenario(name);
+                if (scenario != null)
+                {
+                    _vis.ClearVisualizations();
+                    _playback.PlayScenario(scenario);
+                    context.Reply($"[green][Defender][default] Playing scenario: {name}...");
+                    return;
+                }
+            }
+        }
+
+        if (available.Count == 0)
+        {
+            context.Reply("[red][Defender][white] No scenarios saved!");
+        }
+        else
+        {
+            context.Reply("[green][Defender][white] Available scenarios:");
+            for (int i = 0; i < available.Count; i++)
+            {
+                context.Reply($"[green]{i}[white] - {available[i]}");
+            }
+            context.Reply("Type [lightred]!prac <id>[white] to play one.");
         }
     }
 
@@ -184,13 +288,51 @@ public sealed class CommandHandlers
     {
         var player = context.Sender;
         if (player == null) return;
-        
         _playback.StopScenario();
         var wip = _recording.GetWipScenario();
         if (wip != null)
         {
             _vis.DrawScenario(wip);
         }
-        context.Reply("[green][Defender][default] Returned to Edit Mode.");
+        context.Reply("[green][Defender][default] Returned to edit mode.");
+    }
+
+    private void OnGiveGrenade(ICommandContext context)
+    {
+        var player = context.Sender;
+        if (player == null) return;
+        var wip = _recording.GetWipScenario();
+        if (wip == null)
+        {
+            context.Reply("[red][Defender][white] Use !setup before recording grenades!");
+            return;
+        }
+
+        string cmd = context.CommandName;
+        string wepName = "weapon_flashbang";
+        string typeName = "Flashbang";
+
+        if (cmd == "gsmoke") { wepName = "weapon_smokegrenade"; typeName = "Smoke"; }
+        else if (cmd == "gmolotov") { wepName = "weapon_molotov"; typeName = "Molotov"; } // Also give incendiary if CT? Molotov is standard.
+        else if (cmd == "ggrenade") { wepName = "weapon_hegrenade"; typeName = "HE Grenade"; }
+
+        // Give the player the grenade
+        if (player.PlayerPawn?.ItemServices != null)
+        {
+            player.PlayerPawn.ItemServices.GiveItem<SwiftlyS2.Shared.SchemaDefinitions.CBasePlayerWeapon>(wepName);
+        }
+
+        // Enable grenade previews
+        if (_core != null)
+        {
+            _core.Engine.ExecuteCommand("sv_cheats 1");
+            _core.Engine.ExecuteCommand("sv_grenade_trajectory_prac_pipreview 1");
+            _core.Engine.ExecuteCommand("ammo_grenade_limit_total 5");
+        }
+
+        // Inform RecordingService to expect a throw from this player
+        _recording.StartRecordingGrenade(player.SteamID, wepName);
+
+        context.Reply($"[green][Defender][default] {typeName} equipped! Throw it to record its trajectory.");
     }
 }

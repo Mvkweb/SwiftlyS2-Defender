@@ -45,6 +45,18 @@ public sealed class ScenarioVisualizationService : IScenarioVisualizationService
                 CreateText(new Vector(startPos.X, startPos.Y, startPos.Z + 70.0f), $"Bot #{i + 1}");
             }
         }
+
+        // Draw Grenades
+        for (int i = 0; i < scenario.Grenades.Count; i++)
+        {
+            var grenade = scenario.Grenades[i];
+            var startPos = new Vector(grenade.OriginX, grenade.OriginY, grenade.OriginZ);
+            CreateBeam(startPos, new Color(0, 150, 255, 255)); // Blue for grenades
+            
+            // Format name (e.g. "flashbang_projectile" -> "flashbang")
+            string niceName = grenade.GrenadeType.Replace("_projectile", "");
+            CreateText(new Vector(startPos.X, startPos.Y, startPos.Z + 70.0f), $"{niceName} #{i + 1}");
+        }
     }
 
     public void ClearVisualizations()

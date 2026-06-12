@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.Players;
+using SwiftlyS2.Shared.SchemaDefinitions;
 using SwiftlyS2_Defender.Interfaces;
 using SwiftlyS2_Defender.Models;
 using SwiftlyS2_Defender.Utils;
@@ -17,10 +18,11 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
     private readonly ILogger _logger;
     private readonly IDefenderStateService _state;
 
-    private bool _isPlaying;
+    private bool _isPlaying = false;
     private long _playbackStartTimeMs;
     private Scenario? _playingScenario;
     private readonly Dictionary<int, ScenarioBot> _botAssignments = new();
+    private readonly HashSet<ScenarioGrenade> _thrownGrenades = new();
 
     public ScenarioPlaybackService(ISwiftlyCore core, ILogger logger, IDefenderStateService state)
     {
@@ -35,28 +37,32 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
     {
         _playingScenario = scenario;
         _botAssignments.Clear();
+        _thrownGrenades.Clear();
         _isPlaying = true;
         _playbackStartTimeMs = Environment.TickCount64;
         _state.SetPlayingState(true);
 
+        var bots = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && PlayerUtil.IsBot(p)).ToList();
+        int totalBotsNeeded = scenario.Bots.Count;
+        int currentBots = bots.Count;
+
         var humans = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && !PlayerUtil.IsBot(p)).ToList();
         var human = humans.FirstOrDefault();
-        string botCmd = "bot_add_t"; // default
+        string botCmd = "bot_add_t";
         if (human != null && human.Controller != null && human.Controller.TeamNum == 2) // 2 is Terrorist
         {
             botCmd = "bot_add_ct";
         }
+        
+        _logger.LogInformation("PlayScenario: Need {total} bots, currently have {current}. Spawning...", 
+            totalBotsNeeded, currentBots);
 
-        var currentBots = _core.PlayerManager.GetAllPlayers().Count(p => p.IsValid && PlayerUtil.IsBot(p));
-        var neededBots = scenario.Bots.Count;
-
-        _logger.LogInformation("PlayScenario: Need {Needed} bots, currently have {Current}. Spawning...", neededBots, currentBots);
-
-        int botsToSpawn = neededBots - currentBots;
-        for (int i = 0; i < botsToSpawn; i++)
+        if (currentBots < totalBotsNeeded)
         {
-            float delay = i * 0.2f;
-            _core.Scheduler.DelayBySeconds(delay, () => _core.Engine.ExecuteCommand(botCmd));
+            for (int i = 0; i < totalBotsNeeded - currentBots; i++)
+            {
+                _core.Engine.ExecuteCommand(botCmd);
+            }
         }
 
         ResetToStart(teleportHumans);
@@ -79,15 +85,39 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         {
             // Teleport player
             var humans = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && !PlayerUtil.IsBot(p)).ToList();
-            foreach (var human in humans)
+            foreach (var p in humans)
             {
-                if (human.PlayerPawn != null)
-                    human.PlayerPawn.Teleport(new Vector(_playingScenario.Anchor.X, _playingScenario.Anchor.Y, _playingScenario.Anchor.Z), new QAngle(_playingScenario.Anchor.Pitch, _playingScenario.Anchor.Yaw, 0), Vector.Zero);
+                var position = new Vector(_playingScenario.Anchor.X, _playingScenario.Anchor.Y, _playingScenario.Anchor.Z + 2.0f);
+                var viewAngles = new QAngle(_playingScenario.Anchor.Pitch, _playingScenario.Anchor.Yaw, 0);
+
+                // Strip existing weapons and equip saved loadout
+                if (p.PlayerPawn?.WeaponServices != null && p.PlayerPawn?.ItemServices != null)
+                {
+                    var currentWeapons = p.PlayerPawn.WeaponServices.MyWeapons.Select(w => w.Value?.DesignerName).Where(name => name != null).ToList();
+                    foreach (var wepName in currentWeapons)
+                    {
+                        if (!string.IsNullOrEmpty(wepName))
+                        {
+                            p.PlayerPawn.WeaponServices.RemoveWeaponByDesignerNameAsync(wepName);
+                        }
+                    }
+
+                    if (_playingScenario.PlayerLoadout != null && _playingScenario.PlayerLoadout.Count > 0)
+                    {
+                        foreach (var savedWep in _playingScenario.PlayerLoadout)
+                        {
+                            p.PlayerPawn.ItemServices.GiveItem<CBasePlayerWeapon>(savedWep);
+                        }
+                    }
+                }
+
+                p.PlayerPawn?.Teleport(position, viewAngles, Vector.Zero);
             }
         }
 
         // Let OnTick handle bot assignments dynamically as they spawn!
         _botAssignments.Clear();
+        _thrownGrenades.Clear();
     }
 
     private void OnTick()
@@ -115,22 +145,6 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                         var firstFrame = scenarioBot.Frames[0];
                         availableBot.PlayerPawn.Teleport(new Vector(firstFrame.X, firstFrame.Y, firstFrame.Z), new QAngle(firstFrame.Pitch, firstFrame.Yaw, 0), Vector.Zero);
                     }
-                    
-                    // Fix CS2 Async Model Loading Bug
-                    string modelToSet = "characters/models/tm_phoenix/tm_phoenix.vmdl";
-                    var human = players.FirstOrDefault(p => !PlayerUtil.IsBot(p) && p.IsValid);
-                    if (human != null && human.Controller != null && human.Controller.TeamNum == 2)
-                    {
-                        modelToSet = "characters/models/ctm_sas/ctm_sas.vmdl"; // If human is T, bots are CT
-                    }
-                    
-                    _core.Scheduler.DelayBySeconds(0.3f, () =>
-                    {
-                        if (availableBot.PlayerPawn != null)
-                        {
-                            availableBot.PlayerPawn.SetModel(modelToSet);
-                        }
-                    });
                 }
             }
         }
@@ -183,6 +197,47 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                     }
 
                     botPlayer.PlayerPawn.Teleport(new Vector(frame.X, frame.Y, frame.Z), new QAngle(frame.Pitch, frame.Yaw, 0), velocity);
+                }
+            }
+        }
+
+        // Process Grenade Projectiles
+        foreach (var grenade in _playingScenario.Grenades)
+        {
+            if (!_thrownGrenades.Contains(grenade) && elapsedMs >= grenade.TimeOffsetMs)
+            {
+                _thrownGrenades.Add(grenade);
+
+                var pos = new Vector(grenade.OriginX, grenade.OriginY, grenade.OriginZ);
+                var vel = new Vector(grenade.VelocityX, grenade.VelocityY, grenade.VelocityZ);
+                var ang = SwiftlyS2.Shared.Natives.QAngle.Zero;
+
+                try
+                {
+                    if (grenade.GrenadeType == "flashbang_projectile")
+                    {
+                        SwiftlyS2.Shared.SchemaDefinitions.CFlashbangProjectile.EmitGrenade(pos, ang, vel, null);
+                    }
+                    else if (grenade.GrenadeType == "hegrenade_projectile")
+                    {
+                        SwiftlyS2.Shared.SchemaDefinitions.CHEGrenadeProjectile.EmitGrenade(pos, ang, vel, null);
+                    }
+                    else if (grenade.GrenadeType == "smokegrenade_projectile")
+                    {
+                        SwiftlyS2.Shared.SchemaDefinitions.CSmokeGrenadeProjectile.EmitGrenade(pos, ang, vel, (SwiftlyS2.Shared.Players.Team)2, null);
+                    }
+                    else if (grenade.GrenadeType == "molotov_projectile")
+                    {
+                        SwiftlyS2.Shared.SchemaDefinitions.CMolotovProjectile.EmitGrenade(pos, ang, vel, (SwiftlyS2.Shared.Players.Team)2, null);
+                    }
+                    else if (grenade.GrenadeType == "decoy_projectile")
+                    {
+                        SwiftlyS2.Shared.SchemaDefinitions.CDecoyProjectile.EmitGrenade(pos, ang, vel, null);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogInformation("[Defender-Debug] EmitGrenade EXCEPTION: " + ex.Message + "\n" + ex.StackTrace);
                 }
             }
         }

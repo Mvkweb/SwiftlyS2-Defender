@@ -35,11 +35,13 @@ public sealed class RoundManagerService : IRoundManagerService
         
         if (victim != null && !PlayerUtil.IsBot(victim))
         {
+            _logger.LogInformation("[Defender-Debug] HUMAN player {name} died! Force failing.", victim.Name);
             // Human player died, force fail
             ForceFail();
         }
         else if (victim != null && PlayerUtil.IsBot(victim))
         {
+            _logger.LogInformation("[Defender-Debug] BOT {name} died!", victim.Name);
             // Check if all bots are dead (excluding this victim since PawnIsAlive might still be true)
             var aliveBots = players.Count(p => PlayerUtil.IsBot(p) && p.Controller != null && p.Controller.PawnIsAlive && p.Slot != victimSlot);
             if (aliveBots == 0)
@@ -58,6 +60,7 @@ public sealed class RoundManagerService : IRoundManagerService
     public void ForceFail()
     {
         _logger.LogInformation("[Defender] Attempt Failed! Returning to edit mode.");
+        _logger.LogInformation("[Defender-Debug] StackTrace for ForceFail: " + Environment.StackTrace);
         foreach (var player in _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && !PlayerUtil.IsBot(p)))
         {
             player.SendMessage(SwiftlyS2.Shared.Players.MessageType.Chat, "[red][Defender][white] Attempt Failed! Returning to edit mode.");

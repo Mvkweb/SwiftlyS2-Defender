@@ -2,7 +2,11 @@ using SwiftlyS2.Shared;
 using SwiftlyS2.Shared.GameEvents;
 using SwiftlyS2.Shared.GameEventDefinitions;
 using SwiftlyS2.Shared.Misc;
+using SwiftlyS2.Shared.Natives;
+using SwiftlyS2.Shared.ProtobufDefinitions;
+using SwiftlyS2.Shared.Events;
 using SwiftlyS2_Defender.Interfaces;
+using Microsoft.Extensions.Logging;
 using System;
 
 namespace SwiftlyS2_Defender.Handlers;
@@ -10,16 +14,19 @@ namespace SwiftlyS2_Defender.Handlers;
 public sealed class GameplayEventHandlers
 {
     private readonly IRoundManagerService _roundManager;
+    private readonly IRecordingService _recording;
     private ISwiftlyCore? _core;
     private Guid _playerDeathHook;
     private Guid _playerHurtHook;
     private Guid _roundStartHook;
     private Guid _playerSpawnHook;
+    private Guid _decalHook;
     private readonly HashSet<ulong> _welcomedPlayers = new();
 
-    public GameplayEventHandlers(IRoundManagerService roundManager)
+    public GameplayEventHandlers(IRoundManagerService roundManager, IRecordingService recording)
     {
         _roundManager = roundManager;
+        _recording = recording;
     }
 
     public void Register(ISwiftlyCore core)
@@ -29,6 +36,8 @@ public sealed class GameplayEventHandlers
         _playerHurtHook = core.GameEvent.HookPost<EventPlayerHurt>(OnPlayerHurt);
         _roundStartHook = core.GameEvent.HookPost<EventRoundStart>(OnRoundStart);
         _playerSpawnHook = core.GameEvent.HookPost<EventPlayerSpawn>(OnPlayerSpawn);
+        _decalHook = core.NetMessage.HookServerMessage<CSVCMsg_BSPDecal>((msg) => HookResult.Stop);
+        core.Event.OnEntityCreated += OnEntityCreated;
     }
 
     public void Unregister(ISwiftlyCore core)
@@ -37,6 +46,8 @@ public sealed class GameplayEventHandlers
         if (_playerHurtHook != Guid.Empty) core.GameEvent.Unhook(_playerHurtHook);
         if (_roundStartHook != Guid.Empty) core.GameEvent.Unhook(_roundStartHook);
         if (_playerSpawnHook != Guid.Empty) core.GameEvent.Unhook(_playerSpawnHook);
+        if (_decalHook != Guid.Empty) core.NetMessage.Unhook(_decalHook);
+        core.Event.OnEntityCreated -= OnEntityCreated;
     }
 
     private HookResult OnPlayerDeath(EventPlayerDeath @event)
@@ -46,10 +57,73 @@ public sealed class GameplayEventHandlers
         
         if (victim != null && attacker != null)
         {
+            var deathPos = victim.PlayerPawn?.CBodyComponent?.SceneNode?.AbsOrigin;
+            var deathAngles = victim.PlayerPawn?.EyeAngles;
+
             _roundManager.HandlePlayerDeath(victim.Slot, attacker.Slot);
+
+            // Fast instant respawn exactly where they died
+            if (deathPos != null && deathAngles != null && !victim.IsFakeClient && _core != null)
+            {
+                // Delay by 0.1s to ensure engine fully processes death and physics settle
+                _core.Scheduler.DelayBySeconds(0.1f, () => 
+                {
+                    if (victim.IsValid)
+                    {
+                        victim.Respawn();
+                        victim.PlayerPawn?.Teleport(deathPos.Value, deathAngles.Value, new Vector(0,0,0));
+                    }
+                });
+            }
         }
 
         return HookResult.Continue;
+    }
+
+    private void OnEntityCreated(IOnEntityCreatedEvent @event)
+    {
+        if (!_recording.IsRecordingGrenade) return;
+
+        var entity = @event.Entity;
+        if (entity != null && _core != null)
+        {
+            string initName = entity.DesignerName ?? "null";
+            _core.Logger.LogInformation("[Defender-Debug] OnEntityCreated fired for entity (InitName: {initName})", initName);
+
+            // Delay by 1 tick so entity is fully initialized
+            _core.Scheduler.DelayBySeconds(0.01f, () => 
+            {
+                if (!entity.IsValid) {
+                    _core.Logger.LogInformation("[Defender-Debug] Entity became invalid after 1 tick.");
+                    return;
+                }
+                
+                string delayedName = entity.DesignerName ?? "null";
+                _core.Logger.LogInformation("[Defender-Debug] Delayed tick. DesignerName: {name}", delayedName);
+
+                if (delayedName.Contains("_projectile"))
+                {
+                    _core.Logger.LogInformation("[Defender-Debug] Entity is a projectile!");
+                    
+                    if (entity is SwiftlyS2.Shared.SchemaDefinitions.CBaseCSGrenadeProjectile proj)
+                    {
+                        _core.Logger.LogInformation("[Defender-Debug] Entity casted to CBaseCSGrenadeProjectile successfully.");
+                        if (proj.AbsOrigin.HasValue)
+                        {
+                            _recording.LogProjectileSpawned(proj.DesignerName, proj.AbsOrigin.Value, proj.AbsVelocity);
+                        }
+                        else
+                        {
+                            _core.Logger.LogInformation("[Defender-Debug] AbsOrigin is null!");
+                        }
+                    }
+                    else
+                    {
+                        _core.Logger.LogInformation("[Defender-Debug] Failed to cast to CBaseCSGrenadeProjectile. Type: {type}", entity.GetType().Name);
+                    }
+                }
+            });
+        }
     }
 
     private HookResult OnPlayerHurt(EventPlayerHurt @event)

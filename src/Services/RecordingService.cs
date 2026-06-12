@@ -20,6 +20,8 @@ public sealed class RecordingService : IRecordingService
 
     private Scenario? _wipScenario;
     private ScenarioBot? _activeBot;
+    private bool _isRecordingGrenade = false;
+    public bool IsRecordingGrenade => _isRecordingGrenade;
     private long _recordingStartTimeMs;
     private ulong _recordingPlayerId;
     
@@ -67,6 +69,19 @@ public sealed class RecordingService : IRecordingService
             Pitch = viewAngles.X,
             Yaw = viewAngles.Y
         };
+
+        _wipScenario.PlayerLoadout.Clear();
+        if (player.PlayerPawn?.WeaponServices != null)
+        {
+            foreach (var handle in player.PlayerPawn.WeaponServices.MyWeapons)
+            {
+                var weapon = handle.Value;
+                if (weapon != null && !string.IsNullOrEmpty(weapon.DesignerName))
+                {
+                    _wipScenario.PlayerLoadout.Add(weapon.DesignerName);
+                }
+            }
+        }
         
         _logger.LogInformation("Anchor set.");
     }
@@ -99,16 +114,54 @@ public sealed class RecordingService : IRecordingService
 
     public void StartRecordingGrenade(ulong steamId, string grenadeType)
     {
-        // For brevity, we assume the grenade logic uses the same countdown, but instead of tracking ticks,
-        // we hook EventWeaponFire/GrenadeThrown.
-        // I will implement this as a mock for now and flesh it out in the handler.
+        if (_wipScenario == null || !_wipScenario.Anchor.IsSet) return;
+        _state.SetRecordingState(true);
+        _isRecordingGrenade = true;
+        // Start counting the ticks/frames offset for the grenade
+        _activeBot = new ScenarioBot { Loadout = grenadeType };
+        _activeBot.Frames.Clear(); 
+        // We use activeBot temporarily just to track the time offset since recording started.
+        // The actual throw will be logged by LogGrenadeThrow.
+        _logger.LogInformation("Recording grenade throw...");
+    }
+
+    public void LogProjectileSpawned(string designerName, Vector origin, Vector velocity)
+    {
+        if (!_state.IsRecording || _activeBot == null || _wipScenario == null) return;
+        
+        long timeOffset = _activeBot.Frames.Count > 0 ? _activeBot.Frames.Last().TimeOffsetMs : 0;
+        
+        _wipScenario.Grenades.Add(new ScenarioGrenade
+        {
+            GrenadeType = designerName,
+            TimeOffsetMs = timeOffset,
+            OriginX = origin.X,
+            OriginY = origin.Y,
+            OriginZ = origin.Z,
+            VelocityX = velocity.X,
+            VelocityY = velocity.Y,
+            VelocityZ = velocity.Z
+        });
+
+        _logger.LogInformation("Logged projectile {Name} at {X}, {Y}, {Z}", designerName, origin.X, origin.Y, origin.Z);
+
+        foreach (var p in _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && !p.IsFakeClient))
+        {
+            p.SendMessage(SwiftlyS2.Shared.Players.MessageType.Chat, "[green][Defender][default] Grenade recorded! Use [lightred]!setup[default] or edit mode to finish.");
+        }
+        
+        // Auto-stop recording
+        StopRecording(0); // Pass 0, StopRecording will handle it
     }
 
     public void StopRecording(ulong steamId)
     {
         if (!_state.IsRecording || _activeBot == null) return;
 
-        _wipScenario?.Bots.Add(_activeBot);
+        if (!_isRecordingGrenade)
+        {
+            _wipScenario?.Bots.Add(_activeBot);
+        }
         
         _logger.LogInformation("Recording stopped. Recorded {Count} frames.", _activeBot.Frames.Count);
         if (_wipScenario != null)
@@ -116,6 +169,7 @@ public sealed class RecordingService : IRecordingService
             _vis.DrawScenario(_wipScenario);
         }
         _activeBot = null;
+        _isRecordingGrenade = false;
         
         _state.SetRecordingState(false);
         _playback.StopScenario();
@@ -176,8 +230,12 @@ public sealed class RecordingService : IRecordingService
                     _lastMoveTimeMs = nowMs;
                     _lastPlayerPos = origin.Value;
                 }
-                else if (nowMs - _lastMoveTimeMs > 2000) // 2 seconds of inactivity
+                else if (!_isRecordingGrenade && nowMs - _lastMoveTimeMs > 500) // 0.5 seconds of inactivity
                 {
+                    // Truncate frames that were recorded while stationary
+                    long stopTimeMs = _lastMoveTimeMs - _recordingStartTimeMs;
+                    _activeBot.Frames = _activeBot.Frames.Where(f => f.TimeOffsetMs <= stopTimeMs).ToList();
+
                     player.SendMessage(MessageType.Chat, "[green][Defender][white] Auto-stopped recording due to inactivity.");
                     StopRecording(_recordingPlayerId);
                     return;
