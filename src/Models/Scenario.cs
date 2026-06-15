@@ -49,4 +49,7 @@ public sealed class ScenarioGrenade
     public float VelocityX { get; set; }
     public float VelocityY { get; set; }
     public float VelocityZ { get; set; }
+    public List<float> TrajectoryX { get; set; } = new();
+    public List<float> TrajectoryY { get; set; } = new();
+    public List<float> TrajectoryZ { get; set; } = new();
 }

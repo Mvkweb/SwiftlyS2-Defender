@@ -168,6 +168,20 @@ public sealed class CommandHandlers
                         context.Reply("[red][Defender][white] Scenario has no anchor set!");
                         return;
                     }
+                    // Update loadout to current weapons
+                    loaded.PlayerLoadout.Clear();
+                    if (player.PlayerPawn?.WeaponServices != null)
+                    {
+                        foreach (var handle in player.PlayerPawn.WeaponServices.MyWeapons)
+                        {
+                            var weapon = handle.Value;
+                            if (weapon != null && !string.IsNullOrEmpty(weapon.DesignerName))
+                            {
+                                loaded.PlayerLoadout.Add(weapon.DesignerName);
+                            }
+                        }
+                    }
+
                     _vis.ClearVisualizations();
                     _playback.PlayScenario(loaded, true, player.SteamID);
                     context.Reply($"[green][Defender][default] Testing scenario: {nameToLoad}...");

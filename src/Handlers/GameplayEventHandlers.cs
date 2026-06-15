@@ -15,6 +15,7 @@ public sealed class GameplayEventHandlers
 {
     private readonly IRoundManagerService _roundManager;
     private readonly IRecordingService _recording;
+    private readonly IDefenderStateService _state;
     private ISwiftlyCore? _core;
     private Guid _playerDeathHook;
     private Guid _playerHurtHook;
@@ -23,10 +24,11 @@ public sealed class GameplayEventHandlers
     private Guid _decalHook;
     private readonly HashSet<ulong> _welcomedPlayers = new();
 
-    public GameplayEventHandlers(IRoundManagerService roundManager, IRecordingService recording)
+    public GameplayEventHandlers(IRoundManagerService roundManager, IRecordingService recording, IDefenderStateService state)
     {
         _roundManager = roundManager;
         _recording = recording;
+        _state = state;
     }
 
     public void Register(ISwiftlyCore core)
@@ -54,13 +56,16 @@ public sealed class GameplayEventHandlers
     {
         var victim = @event.UserIdPlayer;
         var attacker = @event.AttackerPlayer;
+
+        if (victim == null) return HookResult.Continue;
         
-        if (victim != null && attacker != null)
+        // Let RoundManager handle it (it checks IsPlaying and Bot vs Human internally)
+        _roundManager.HandlePlayerDeath(victim.Slot, attacker?.Slot ?? -1);
+
+        if (!_state.IsPlaying)
         {
             var deathPos = victim.PlayerPawn?.CBodyComponent?.SceneNode?.AbsOrigin;
             var deathAngles = victim.PlayerPawn?.EyeAngles;
-
-            _roundManager.HandlePlayerDeath(victim.Slot, attacker.Slot);
 
             // Fast instant respawn exactly where they died
             if (deathPos != null && deathAngles != null && !victim.IsFakeClient && _core != null)
@@ -115,7 +120,7 @@ public sealed class GameplayEventHandlers
                         _core.Logger.LogInformation("[Defender-Debug] Entity casted to CBaseCSGrenadeProjectile successfully.");
                         if (proj.AbsOrigin.HasValue)
                         {
-                            _recording.LogProjectileSpawned(proj.DesignerName, proj.AbsOrigin.Value, proj.AbsVelocity);
+                            _recording.LogProjectileSpawned(proj);
                         }
                         else
                         {

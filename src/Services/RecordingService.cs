@@ -162,7 +162,10 @@ public sealed class RecordingService : IRecordingService
         _logger.LogInformation("Recording grenade throw...");
     }
 
-    public void LogProjectileSpawned(string designerName, Vector origin, Vector velocity)
+    private SwiftlyS2.Shared.SchemaDefinitions.CBaseCSGrenadeProjectile? _activeProjectile;
+    private ScenarioGrenade? _activeGrenade;
+
+    public void LogProjectileSpawned(SwiftlyS2.Shared.SchemaDefinitions.CBaseCSGrenadeProjectile proj)
     {
         if (!_state.IsRecording || _activeBot == null || _wipScenario == null) return;
         
@@ -172,7 +175,11 @@ public sealed class RecordingService : IRecordingService
         else
             timeOffset = _activeBot.Frames.Count > 0 ? _activeBot.Frames.Last().TimeOffsetMs : 0;
         
-        _wipScenario.Grenades.Add(new ScenarioGrenade
+        var designerName = proj.DesignerName ?? "smokegrenade_projectile";
+        var origin = proj.AbsOrigin ?? Vector.Zero;
+        var velocity = proj.AbsVelocity;
+
+        var grenade = new ScenarioGrenade
         {
             GrenadeType = designerName,
             TimeOffsetMs = timeOffset,
@@ -182,7 +189,11 @@ public sealed class RecordingService : IRecordingService
             VelocityX = velocity.X,
             VelocityY = velocity.Y,
             VelocityZ = velocity.Z
-        });
+        };
+        _wipScenario.Grenades.Add(grenade);
+
+        _activeProjectile = proj;
+        _activeGrenade = grenade;
 
         _logger.LogInformation("Logged projectile {Name} at {X}, {Y}, {Z}", designerName, origin.X, origin.Y, origin.Z);
 
@@ -241,6 +252,44 @@ public sealed class RecordingService : IRecordingService
 
     private void OnTick()
     {
+        if (_activeProjectile != null && _activeGrenade != null)
+        {
+            if (_activeProjectile.IsValid)
+            {
+                var pos = _activeProjectile.AbsOrigin;
+                if (pos.HasValue)
+                {
+                    // Draw live segment from last point to current point
+                    if (_activeGrenade.TrajectoryX.Count > 0)
+                    {
+                        var lastX = _activeGrenade.TrajectoryX.Last();
+                        var lastY = _activeGrenade.TrajectoryY.Last();
+                        var lastZ = _activeGrenade.TrajectoryZ.Last();
+                        var pt1 = new Vector(lastX, lastY, lastZ);
+                        var pt2 = new Vector(pos.Value.X, pos.Value.Y, pos.Value.Z);
+                        _vis.DrawLiveTrajectorySegment(pt1, pt2, _activeGrenade.GrenadeType);
+                    }
+
+                    _activeGrenade.TrajectoryX.Add(pos.Value.X);
+                    _activeGrenade.TrajectoryY.Add(pos.Value.Y);
+                    _activeGrenade.TrajectoryZ.Add(pos.Value.Z);
+                }
+            }
+            else
+            {
+                _activeProjectile = null;
+                _activeGrenade = null;
+                
+                // The projectile is destroyed (detonated).
+                // Redraw the entire scenario to clear the fallback vertical beam 
+                // and cleanly redraw all trajectory segments as a single batch!
+                if (_wipScenario != null)
+                {
+                    _vis.DrawScenario(_wipScenario);
+                }
+            }
+        }
+
         if (!_state.IsRecording || _isCountingDown || _activeBot == null) return;
 
         var nowMs = Environment.TickCount64;

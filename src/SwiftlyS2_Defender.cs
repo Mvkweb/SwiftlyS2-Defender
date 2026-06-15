@@ -27,10 +27,11 @@ public class SwiftlyS2_Defender : BasePlugin
 
         var roundManager = _serviceProvider.GetRequiredService<IRoundManagerService>();
         var recording = _serviceProvider.GetRequiredService<IRecordingService>();
-        _gameplayEventHandlers = new GameplayEventHandlers(roundManager, recording);
+        var state = _serviceProvider.GetRequiredService<IDefenderStateService>();
+        _gameplayEventHandlers = new GameplayEventHandlers(roundManager, recording, state);
         _gameplayEventHandlers.Register(Core);
 
-        var state = _serviceProvider.GetRequiredService<IDefenderStateService>();
+
         var config = _serviceProvider.GetRequiredService<IDefenderConfigService>();
         var playback = _serviceProvider.GetRequiredService<IScenarioPlaybackService>();
         var vis = _serviceProvider.GetRequiredService<IScenarioVisualizationService>();

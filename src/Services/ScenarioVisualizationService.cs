@@ -51,12 +51,34 @@ public sealed class ScenarioVisualizationService : IScenarioVisualizationService
         {
             var grenade = scenario.Grenades[i];
             var startPos = new Vector(grenade.OriginX, grenade.OriginY, grenade.OriginZ);
-            CreateBeam(startPos, new Color(0, 150, 255, 255)); // Blue for grenades
             
             // Format name (e.g. "flashbang_projectile" -> "flashbang")
             string niceName = grenade.GrenadeType.Replace("_projectile", "");
             CreateText(new Vector(startPos.X, startPos.Y, startPos.Z + 70.0f), $"{niceName} #{i + 1}");
+
+            var grenadeColor = GetGrenadeColor(grenade.GrenadeType);
+
+            if (grenade.TrajectoryX.Count > 1)
+            {
+                // Draw trajectory segments
+                for (int j = 0; j < grenade.TrajectoryX.Count - 1; j++)
+                {
+                    var pt1 = new Vector(grenade.TrajectoryX[j], grenade.TrajectoryY[j], grenade.TrajectoryZ[j]);
+                    var pt2 = new Vector(grenade.TrajectoryX[j+1], grenade.TrajectoryY[j+1], grenade.TrajectoryZ[j+1]);
+                    CreateBeamSegment(pt1, pt2, grenadeColor);
+                }
+            }
         }
+    }
+
+    private Color GetGrenadeColor(string grenadeType)
+    {
+        if (grenadeType.Contains("flashbang")) return new Color(255, 255, 255, 255); // White
+        if (grenadeType.Contains("smokegrenade")) return new Color(150, 150, 150, 255); // Gray
+        if (grenadeType.Contains("molotov") || grenadeType.Contains("incendiary")) return new Color(255, 100, 0, 255); // Orange
+        if (grenadeType.Contains("hegrenade")) return new Color(255, 0, 0, 255); // Red
+        if (grenadeType.Contains("decoy")) return new Color(0, 255, 0, 255); // Green
+        return new Color(0, 150, 255, 255); // Default Blue
     }
 
     public void ClearVisualizations()
@@ -97,6 +119,54 @@ public sealed class ScenarioVisualizationService : IScenarioVisualizationService
         beam.EndPos.X = start.X;
         beam.EndPos.Y = start.Y;
         beam.EndPos.Z = start.Z + 100.0f;
+
+        beam.Teleport(start, new QAngle(0, 0, 0), Vector.Zero);
+        beam.DispatchSpawn();
+
+        beam.LifeStateUpdated();
+        beam.StartFrameUpdated();
+        beam.FrameRateUpdated();
+        beam.WidthUpdated();
+        beam.EndWidthUpdated();
+        beam.AmplitudeUpdated();
+        beam.SpeedUpdated();
+        beam.BeamFlagsUpdated();
+        beam.BeamTypeUpdated();
+        beam.FadeLengthUpdated();
+        beam.TurnedOffUpdated();
+        beam.EndPosUpdated();
+        beam.RenderUpdated();
+
+        _beamIndices.Add(beam.Index);
+    }
+
+    public void DrawLiveTrajectorySegment(Vector start, Vector end, string grenadeType)
+    {
+        var color = GetGrenadeColor(grenadeType);
+        CreateBeamSegment(start, end, color);
+    }
+
+    private void CreateBeamSegment(Vector start, Vector end, Color color)
+    {
+        var beam = _core.EntitySystem.CreateEntityByDesignerName<CBeam>("beam");
+        if (beam == null) return;
+
+        beam.StartFrame = 0;
+        beam.FrameRate = 0;
+        beam.LifeState = 1;
+        beam.Width = 2.0f; // thinner than the anchor beam
+        beam.EndWidth = 2.0f;
+        beam.Amplitude = 0;
+        beam.Speed = 50;
+        beam.BeamFlags = 0;
+        beam.BeamType = BeamType_t.BEAM_HOSE;
+        beam.FadeLength = 10.0f;
+        beam.Render = color;
+        beam.TurnedOff = false;
+
+        beam.EndPos.X = end.X;
+        beam.EndPos.Y = end.Y;
+        beam.EndPos.Z = end.Z;
 
         beam.Teleport(start, new QAngle(0, 0, 0), Vector.Zero);
         beam.DispatchSpawn();

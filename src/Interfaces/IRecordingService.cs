@@ -9,7 +9,7 @@ public interface IRecordingService
     void SetPlayerDefendAnchor(ulong steamId);
     void StartRecordingBot(ulong steamId);
     void StartRecordingGrenade(ulong steamId, string grenadeType);
-    void LogProjectileSpawned(string designerName, SwiftlyS2.Shared.Natives.Vector origin, SwiftlyS2.Shared.Natives.Vector velocity);
+    void LogProjectileSpawned(SwiftlyS2.Shared.SchemaDefinitions.CBaseCSGrenadeProjectile proj);
     void StopRecording(ulong steamId);
     void ClearLastElement();
     void SaveScenario();

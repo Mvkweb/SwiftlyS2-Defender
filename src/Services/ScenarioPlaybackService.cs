@@ -38,6 +38,12 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _playingScenario = scenario;
         _botAssignments.Clear();
         _thrownGrenades.Clear();
+
+        // Clear molotov fire patches and flying molotovs
+        _core.Engine.ExecuteCommand("ent_fire inferno kill");
+        _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
+
         _isPlaying = true;
         _playbackStartTimeMs = Environment.TickCount64;
         _state.SetPlayingState(true);
@@ -79,11 +85,28 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _playingScenario = null;
         _botAssignments.Clear();
         _state.SetPlayingState(false);
+
+        // Clear active grenades
+        _core.Engine.ExecuteCommand("ent_fire inferno kill");
+        _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire flashbang_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire smokegrenade_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire decoy_projectile kill");
     }
 
     public void ResetToStart(bool teleportHumans = true, ulong? testingPlayerId = null)
     {
         if (_playingScenario == null) return;
+
+        // Clear active grenades
+        _core.Engine.ExecuteCommand("ent_fire inferno kill");
+        _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire flashbang_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire smokegrenade_projectile kill");
+        _core.Engine.ExecuteCommand("ent_fire decoy_projectile kill");
+
         _playbackStartTimeMs = Environment.TickCount64;
 
         if (teleportHumans)
