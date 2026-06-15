@@ -52,10 +52,10 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
 
         int totalBotsNeeded = scenario.Bots.Count;
         if (scenario.Grenades.Count > 0 && totalBotsNeeded == 0) totalBotsNeeded = 1; // Need at least 1 bot to throw grenades
-        
+
         var bots = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && PlayerUtil.IsBot(p)).ToList();
         int currentBots = bots.Count;
-        
+
         // Spawn bots if we don't have enough
         string botCmd = "bot_add_t";
         if (testingPlayerId != null)
@@ -86,13 +86,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _botAssignments.Clear();
         _state.SetPlayingState(false);
 
-        // Clear active grenades
-        _core.Engine.ExecuteCommand("ent_fire inferno kill");
-        _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire flashbang_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire smokegrenade_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire decoy_projectile kill");
+        ClearActiveGrenades();
     }
 
     public void ResetToStart(bool teleportHumans = true, ulong? testingPlayerId = null)
@@ -100,12 +94,19 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         if (_playingScenario == null) return;
 
         // Clear active grenades
-        _core.Engine.ExecuteCommand("ent_fire inferno kill");
         _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
         _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
         _core.Engine.ExecuteCommand("ent_fire flashbang_projectile kill");
         _core.Engine.ExecuteCommand("ent_fire smokegrenade_projectile kill");
         _core.Engine.ExecuteCommand("ent_fire decoy_projectile kill");
+
+        // Delay the fire cleanup by 0.1s to ensure the engine has fully spawned the inferno from the dying projectile
+        _core.Scheduler.DelayBySeconds(0.1f, () => 
+        {
+            _core.Engine.ExecuteCommand("ent_fire inferno kill");
+            _core.Engine.ExecuteCommand("ent_fire cs_inferno kill");
+            _core.Engine.ExecuteCommand("r_cleardecals");
+        });
 
         _playbackStartTimeMs = Environment.TickCount64;
 
@@ -141,10 +142,17 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
 
                     if (_playingScenario.PlayerLoadout != null && _playingScenario.PlayerLoadout.Count > 0)
                     {
-                        foreach (var savedWep in _playingScenario.PlayerLoadout)
+                        // Delay equipping the loadout to give RemoveWeaponByDesignerNameAsync time to finish
+                        // completely clearing the weapon slots. Otherwise GiveItem will silently fail.
+                        _core.Scheduler.DelayBySeconds(0.1f, () =>
                         {
-                            p.PlayerPawn.ItemServices.GiveItem<CBasePlayerWeapon>(savedWep);
-                        }
+                            if (!p.IsValid || p.PlayerPawn?.ItemServices == null) return;
+
+                            foreach (var savedWep in _playingScenario.PlayerLoadout)
+                            {
+                                p.PlayerPawn.ItemServices.GiveItem<CBasePlayerWeapon>(savedWep);
+                            }
+                        });
                     }
                 }
             }
@@ -173,7 +181,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                 if (availableBot != null && availableBot.Controller != null && availableBot.Controller.PawnIsAlive && availableBot.PlayerPawn != null)
                 {
                     _botAssignments[availableBot.Slot] = scenarioBot;
-                    
+
                     // Teleport immediately to first frame if they just spawned
                     if (scenarioBot.Frames.Count > 0)
                     {
@@ -189,7 +197,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
             var botSlot = assignment.Key;
             var scenarioBot = assignment.Value;
             var botPlayer = players.FirstOrDefault(p => p.Slot == botSlot);
-            
+
             if (botPlayer == null || !botPlayer.IsValid || botPlayer.PlayerPawn == null || botPlayer.Controller == null || !botPlayer.Controller.PawnIsAlive) continue;
 
             var lastFrame = scenarioBot.Frames.LastOrDefault();
@@ -202,10 +210,10 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                     var dx = human.PlayerPawn.AbsOrigin.Value.X - botPlayer.PlayerPawn.AbsOrigin.Value.X;
                     var dy = human.PlayerPawn.AbsOrigin.Value.Y - botPlayer.PlayerPawn.AbsOrigin.Value.Y;
                     var dz = (human.PlayerPawn.AbsOrigin.Value.Z + 64f) - (botPlayer.PlayerPawn.AbsOrigin.Value.Z + 64f);
-                    
+
                     var yaw = System.MathF.Atan2(dy, dx) * 180f / System.MathF.PI;
                     var pitch = System.MathF.Atan2(-dz, System.MathF.Sqrt(dx * dx + dy * dy)) * 180f / System.MathF.PI;
-                    
+
                     botPlayer.PlayerPawn.Teleport(botPlayer.PlayerPawn.AbsOrigin.Value, new QAngle(pitch, yaw, 0), Vector.Zero);
                 }
             }
@@ -249,8 +257,8 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
 
                 try
                 {
-                    var throwerBotPawn = _botAssignments.Count > 0 
-                        ? _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.Slot == _botAssignments.Keys.First())?.PlayerPawn 
+                    var throwerBotPawn = _botAssignments.Count > 0
+                        ? _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.Slot == _botAssignments.Keys.First())?.PlayerPawn
                         : _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.IsValid && PlayerUtil.IsBot(p))?.PlayerPawn;
 
                     if (grenade.GrenadeType == "flashbang_projectile")
@@ -280,5 +288,45 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                 }
             }
         }
+    }
+
+    private void ClearActiveGrenades()
+    {
+        string[] grenadeClasses = { 
+            "molotov_projectile", 
+            "hegrenade_projectile", 
+            "flashbang_projectile", 
+            "smokegrenade_projectile", 
+            "decoy_projectile" 
+        };
+
+        foreach (var cls in grenadeClasses)
+        {
+            var ents = _core.EntitySystem.GetAllEntitiesByDesignerName<SwiftlyS2.Shared.SchemaDefinitions.CBaseEntity>(cls);
+            if (ents != null)
+            {
+                foreach (var e in ents)
+                {
+                    if (e != null && e.IsValid) e.AcceptInput<string>("Kill", "", null, null, 0);
+                }
+            }
+        }
+
+        // Delay fire cleanup by 0.1s to catch mid-air detonations
+        _core.Scheduler.DelayBySeconds(0.1f, () => 
+        {
+            string[] fireClasses = { "inferno", "cs_inferno" };
+            foreach (var cls in fireClasses)
+            {
+                var ents = _core.EntitySystem.GetAllEntitiesByDesignerName<SwiftlyS2.Shared.SchemaDefinitions.CBaseEntity>(cls);
+                if (ents != null)
+                {
+                    foreach (var e in ents)
+                    {
+                        if (e != null && e.IsValid) e.AcceptInput<string>("Kill", "", null, null, 0);
+                    }
+                }
+            }
+        });
     }
 }

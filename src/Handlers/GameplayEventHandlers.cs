@@ -21,7 +21,6 @@ public sealed class GameplayEventHandlers
     private Guid _playerHurtHook;
     private Guid _roundStartHook;
     private Guid _playerSpawnHook;
-    private Guid _decalHook;
     private readonly HashSet<ulong> _welcomedPlayers = new();
 
     public GameplayEventHandlers(IRoundManagerService roundManager, IRecordingService recording, IDefenderStateService state)
@@ -38,7 +37,6 @@ public sealed class GameplayEventHandlers
         _playerHurtHook = core.GameEvent.HookPost<EventPlayerHurt>(OnPlayerHurt);
         _roundStartHook = core.GameEvent.HookPost<EventRoundStart>(OnRoundStart);
         _playerSpawnHook = core.GameEvent.HookPost<EventPlayerSpawn>(OnPlayerSpawn);
-        _decalHook = core.NetMessage.HookServerMessage<CSVCMsg_BSPDecal>((msg) => HookResult.Stop);
         core.Event.OnEntityCreated += OnEntityCreated;
     }
 
@@ -48,7 +46,6 @@ public sealed class GameplayEventHandlers
         if (_playerHurtHook != Guid.Empty) core.GameEvent.Unhook(_playerHurtHook);
         if (_roundStartHook != Guid.Empty) core.GameEvent.Unhook(_roundStartHook);
         if (_playerSpawnHook != Guid.Empty) core.GameEvent.Unhook(_playerSpawnHook);
-        if (_decalHook != Guid.Empty) core.NetMessage.Unhook(_decalHook);
         core.Event.OnEntityCreated -= OnEntityCreated;
     }
 
@@ -58,6 +55,9 @@ public sealed class GameplayEventHandlers
         var attacker = @event.AttackerPlayer;
 
         if (victim == null) return HookResult.Continue;
+
+        // Clear blood decals when someone dies so the map stays clean
+        _core?.Engine.ExecuteCommand("r_cleardecals");
         
         // Let RoundManager handle it (it checks IsPlaying and Bot vs Human internally)
         _roundManager.HandlePlayerDeath(victim.Slot, attacker?.Slot ?? -1);
@@ -92,12 +92,22 @@ public sealed class GameplayEventHandlers
 
     private void OnEntityCreated(IOnEntityCreatedEvent @event)
     {
+        var entity = @event.Entity;
+        if (entity == null) return;
+
+        string initName = entity.DesignerName ?? "";
+
+        // Block blood decal entities from ever spawning
+        if (initName.Contains("decal") || initName.Contains("blood"))
+        {
+            entity.AcceptInput<string>("Kill", "", null, null, 0);
+            return;
+        }
+
         if (!_recording.IsRecordingGrenade) return;
 
-        var entity = @event.Entity;
-        if (entity != null && _core != null)
+        if (_core != null)
         {
-            string initName = entity.DesignerName ?? "null";
             _core.Logger.LogInformation("[Defender-Debug] OnEntityCreated fired for entity (InitName: {initName})", initName);
 
             // Delay by 1 tick so entity is fully initialized
