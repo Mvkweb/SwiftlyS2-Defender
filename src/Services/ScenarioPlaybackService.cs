@@ -93,20 +93,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
     {
         if (_playingScenario == null) return;
 
-        // Clear active grenades
-        _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire flashbang_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire smokegrenade_projectile kill");
-        _core.Engine.ExecuteCommand("ent_fire decoy_projectile kill");
-
-        // Delay the fire cleanup by 0.1s to ensure the engine has fully spawned the inferno from the dying projectile
-        _core.Scheduler.DelayBySeconds(0.1f, () => 
-        {
-            _core.Engine.ExecuteCommand("ent_fire inferno kill");
-            _core.Engine.ExecuteCommand("ent_fire cs_inferno kill");
-            _core.Engine.ExecuteCommand("r_cleardecals");
-        });
+        ClearActiveGrenades();
 
         _playbackStartTimeMs = Environment.TickCount64;
 
@@ -300,32 +287,58 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
             "decoy_projectile" 
         };
 
-        foreach (var cls in grenadeClasses)
+        try
         {
-            var ents = _core.EntitySystem.GetAllEntitiesByDesignerName<SwiftlyS2.Shared.SchemaDefinitions.CBaseEntity>(cls);
-            if (ents != null)
+            foreach (var cls in grenadeClasses)
             {
-                foreach (var e in ents)
+                var ents = _core.EntitySystem.GetAllEntitiesByDesignerName<SwiftlyS2.Shared.SchemaDefinitions.CBaseEntity>(cls)?.ToList();
+                if (ents != null)
                 {
-                    if (e != null && e.IsValid) e.AcceptInput<string>("Kill", "", null, null, 0);
+                    int count = 0;
+                    foreach (var e in ents)
+                    {
+                        if (e != null && e.IsValid) 
+                        {
+                            e.AcceptInput<string>("Kill", "", null, null, 0);
+                            count++;
+                        }
+                    }
+                    if (count > 0) _logger.LogInformation($"[Defender-Debug-Cleanup] Killed {count} {cls}");
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"[Defender-Debug-Cleanup] Grenade error: {ex.Message}");
         }
 
         // Delay fire cleanup by 0.1s to catch mid-air detonations
         _core.Scheduler.DelayBySeconds(0.1f, () => 
         {
-            string[] fireClasses = { "inferno", "cs_inferno" };
-            foreach (var cls in fireClasses)
+            try
             {
-                var ents = _core.EntitySystem.GetAllEntitiesByDesignerName<SwiftlyS2.Shared.SchemaDefinitions.CBaseEntity>(cls);
-                if (ents != null)
+                string[] fireClasses = { "inferno", "cs_inferno" };
+                foreach (var cls in fireClasses)
                 {
-                    foreach (var e in ents)
+                    var ents = _core.EntitySystem.GetAllEntitiesByDesignerName<SwiftlyS2.Shared.SchemaDefinitions.CBaseEntity>(cls)?.ToList();
+                    if (ents != null)
                     {
-                        if (e != null && e.IsValid) e.AcceptInput<string>("Kill", "", null, null, 0);
+                        int count = 0;
+                        foreach (var e in ents)
+                        {
+                            if (e != null && e.IsValid) 
+                            {
+                                e.AcceptInput<string>("Kill", "", null, null, 0);
+                                count++;
+                            }
+                        }
+                        if (count > 0) _logger.LogInformation($"[Defender-Debug-Cleanup] Killed {count} {cls}");
                     }
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"[Defender-Debug-Cleanup] Fire error: {ex.Message}");
             }
         });
     }

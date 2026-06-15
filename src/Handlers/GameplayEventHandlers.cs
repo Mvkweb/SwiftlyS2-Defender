@@ -21,6 +21,7 @@ public sealed class GameplayEventHandlers
     private Guid _playerHurtHook;
     private Guid _roundStartHook;
     private Guid _playerSpawnHook;
+    private Guid _decalHook;
     private readonly HashSet<ulong> _welcomedPlayers = new();
 
     public GameplayEventHandlers(IRoundManagerService roundManager, IRecordingService recording, IDefenderStateService state)
@@ -37,6 +38,7 @@ public sealed class GameplayEventHandlers
         _playerHurtHook = core.GameEvent.HookPost<EventPlayerHurt>(OnPlayerHurt);
         _roundStartHook = core.GameEvent.HookPost<EventRoundStart>(OnRoundStart);
         _playerSpawnHook = core.GameEvent.HookPost<EventPlayerSpawn>(OnPlayerSpawn);
+        _decalHook = core.NetMessage.HookServerMessage<SwiftlyS2.Shared.ProtobufDefinitions.CMsgPlaceDecalEvent>(OnPlaceDecal);
         core.Event.OnEntityCreated += OnEntityCreated;
     }
 
@@ -46,6 +48,7 @@ public sealed class GameplayEventHandlers
         if (_playerHurtHook != Guid.Empty) core.GameEvent.Unhook(_playerHurtHook);
         if (_roundStartHook != Guid.Empty) core.GameEvent.Unhook(_roundStartHook);
         if (_playerSpawnHook != Guid.Empty) core.GameEvent.Unhook(_playerSpawnHook);
+        if (_decalHook != Guid.Empty) core.NetMessage.Unhook(_decalHook);
         core.Event.OnEntityCreated -= OnEntityCreated;
     }
 
@@ -56,9 +59,6 @@ public sealed class GameplayEventHandlers
 
         if (victim == null) return HookResult.Continue;
 
-        // Clear blood decals when someone dies so the map stays clean
-        _core?.Engine.ExecuteCommand("r_cleardecals");
-        
         // Let RoundManager handle it (it checks IsPlaying and Bot vs Human internally)
         _roundManager.HandlePlayerDeath(victim.Slot, attacker?.Slot ?? -1);
 
@@ -97,7 +97,7 @@ public sealed class GameplayEventHandlers
 
         string initName = entity.DesignerName ?? "";
 
-        // Block blood decal entities from ever spawning
+        // Block blood decal entities from ever spawning (if any)
         if (initName.Contains("decal") || initName.Contains("blood"))
         {
             entity.AcceptInput<string>("Kill", "", null, null, 0);
@@ -144,6 +144,12 @@ public sealed class GameplayEventHandlers
                 }
             });
         }
+    }
+
+    private HookResult OnPlaceDecal(SwiftlyS2.Shared.ProtobufDefinitions.CMsgPlaceDecalEvent msg)
+    {
+        // Stop all decal network messages entirely, which prevents client-side blood and bullet holes.
+        return HookResult.Stop;
     }
 
     private HookResult OnPlayerHurt(EventPlayerHurt @event)
