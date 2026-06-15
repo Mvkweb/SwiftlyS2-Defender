@@ -1,0 +1,86 @@
+name: Release Workflow
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    if: contains(github.event.head_commit.message, '[release]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from SwiftlyS2_Defender.cs
+        id: version
+        run: |
+          VERSION=$(grep -E 'Version\s*=\s*"[^"]+"' src/SwiftlyS2_Defender.cs | grep -o '"[^"]\+"' | head -1 | tr -d '"')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not find PluginMetadata Version"
+            exit 1
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $VERSION"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Build and Package
+        run: |
+          dotnet restore SwiftlyS2_Defender.csproj
+          dotnet publish SwiftlyS2_Defender.csproj -c Release -o output/SwiftlyS2-Defender
+          
+          # Create zip containing the SwiftlyS2-Defender folder
+          cd output
+          zip -r ../SwiftlyS2-Defender-v${{ steps.version.outputs.version }}.zip SwiftlyS2-Defender/
+          cd ..
+
+      - name: Determine tag and format Changelog
+        id: release_info
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="v$VERSION"
+          
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          # Initialize changelog file
+          echo "🎉 **SwiftlyS2-Defender Release $TAG**" > changelog.md
+          echo "" >> changelog.md
+          echo "### Changelog" >> changelog.md
+          
+          if [ -n "$PREV_TAG" ]; then
+            # Extract commits since previous tag, format: * Commit message (`hash`) by author
+            git log ${PREV_TAG}..HEAD --pretty=format:"* %s (\`%h\`) by %an" >> changelog.md
+            echo "" >> changelog.md
+            echo "" >> changelog.md
+            echo "**Full Compare**: https://github.com/${{ github.repository }}/compare/${PREV_TAG}...${TAG}" >> changelog.md
+          else
+            # No previous tag, just grab last 10 commits
+            git log -10 --pretty=format:"* %s (\`%h\`) by %an" >> changelog.md
+            echo "" >> changelog.md
+          fi
+          
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.release_info.outputs.tag }}"
+          
+          gh release create "$TAG" \
+            --title "SwiftlyS2-Defender | $TAG" \
+            --notes-file changelog.md \
+            SwiftlyS2-Defender-$TAG.zip

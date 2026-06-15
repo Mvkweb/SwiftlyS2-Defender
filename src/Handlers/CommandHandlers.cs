@@ -34,7 +34,7 @@ public sealed class CommandHandlers
     {
         _core = core;
         _commandGuids.Add(core.Command.RegisterCommand("setup", OnSetupScenario, registerRaw: true));
-        _commandGuids.Add(core.Command.RegisterCommand("set_player", OnSetPlayer, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("player", OnSetPlayer, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("bot", OnRecordBot, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("record_bot", OnRecordBot, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("stop", OnStopRecording, registerRaw: true));
@@ -51,6 +51,14 @@ public sealed class CommandHandlers
         _commandGuids.Add(core.Command.RegisterCommand("gsmoke", OnGiveGrenade, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("gmolotov", OnGiveGrenade, registerRaw: true));
         _commandGuids.Add(core.Command.RegisterCommand("ggrenade", OnGiveGrenade, registerRaw: true));
+
+        _commandGuids.Add(core.Command.RegisterCommand("nades", OnListNades, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("nade+", OnNadeAdd, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("nade-", OnNadeSub, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("nade", OnNadeSet, registerRaw: true));
+
+        _commandGuids.Add(core.Command.RegisterCommand("ak", OnGiveAk, registerRaw: true));
+        _commandGuids.Add(core.Command.RegisterCommand("ak47", OnGiveAk, registerRaw: true));
     }
 
     public void Unregister(ISwiftlyCore core)
@@ -99,13 +107,13 @@ public sealed class CommandHandlers
     {
         var player = context.Sender;
         if (player == null) return;
-        _recording.SetPlayerAnchor(player.SteamID);
+        _recording.SetPlayerDefendAnchor(player.SteamID);
         var wip = _recording.GetWipScenario();
         if (wip != null)
         {
             _vis.DrawScenario(wip);
         }
-        context.Reply("[green][Defender][default] Anchor set for player.");
+        context.Reply("[green][Defender][default] Player defend anchor set!");
     }
 
     private void OnRecordBot(ICommandContext context)
@@ -161,7 +169,7 @@ public sealed class CommandHandlers
                         return;
                     }
                     _vis.ClearVisualizations();
-                    _playback.PlayScenario(loaded);
+                    _playback.PlayScenario(loaded, true, player.SteamID);
                     context.Reply($"[green][Defender][default] Testing scenario: {nameToLoad}...");
                     return;
                 }
@@ -175,7 +183,7 @@ public sealed class CommandHandlers
         {
             if (!scenario.Anchor.IsSet)
             {
-                context.Reply("[red][Defender][white] You must set a player anchor with [lightred]!set_player[white] before testing!");
+                context.Reply("[red][Defender][white] You must set a player anchor with [lightred]!player[white] before testing!");
                 return;
             }
 
@@ -194,7 +202,7 @@ public sealed class CommandHandlers
             }
 
             _vis.ClearVisualizations();
-            _playback.PlayScenario(scenario);
+            _playback.PlayScenario(scenario, true, player.SteamID);
             context.Reply("[green][Defender][default] Testing active scenario...");
         }
         else
@@ -231,7 +239,7 @@ public sealed class CommandHandlers
                 if (loaded != null)
                 {
                     _vis.ClearVisualizations();
-                    _playback.PlayScenario(loaded);
+                    _playback.PlayScenario(loaded, true, player.SteamID);
                     context.Reply($"[green][Defender][default] Playing scenario: {nameToLoad}...");
                     return;
                 }
@@ -243,7 +251,7 @@ public sealed class CommandHandlers
                 if (scenario != null)
                 {
                     _vis.ClearVisualizations();
-                    _playback.PlayScenario(scenario);
+                    _playback.PlayScenario(scenario, true, player.SteamID);
                     context.Reply($"[green][Defender][default] Playing scenario: {name}...");
                     return;
                 }
@@ -334,5 +342,130 @@ public sealed class CommandHandlers
         _recording.StartRecordingGrenade(player.SteamID, wepName);
 
         context.Reply($"[green][Defender][default] {typeName} equipped! Throw it to record its trajectory.");
+    }
+
+    private void OnListNades(ICommandContext context)
+    {
+        var player = context.Sender;
+        if (player == null) return;
+        var wip = _recording.GetWipScenario();
+        if (wip == null || wip.Grenades.Count == 0)
+        {
+            context.Reply("[red][Defender][white] No grenades in the current scenario.");
+            return;
+        }
+
+        context.Reply("[green][Defender][white] Recorded Grenades:");
+        for (int i = 0; i < wip.Grenades.Count; i++)
+        {
+            context.Reply($"  [yellow]ID {i}[white]: {wip.Grenades[i].GrenadeType} @ {wip.Grenades[i].TimeOffsetMs}ms");
+        }
+        context.Reply("Use [yellow]!nade <id> <ms>[white] to set, or [yellow]!nade+/- <id> <ms>[white] to adjust.");
+    }
+
+    private void OnNadeAdd(ICommandContext context)
+    {
+        var player = context.Sender;
+        if (player == null) return;
+        var wip = _recording.GetWipScenario();
+        if (wip == null || wip.Grenades.Count == 0)
+        {
+            context.Reply("[red][Defender][white] No grenades in the current scenario.");
+            return;
+        }
+
+        if (context.Args.Length < 2)
+        {
+            context.Reply("Usage: !nade+ <id> <ms>. Example: !nade+ 0 200");
+            return;
+        }
+
+        if (int.TryParse(context.Args[0], out int id) && id >= 0 && id < wip.Grenades.Count)
+        {
+            if (int.TryParse(context.Args[1], out int ms))
+            {
+                wip.Grenades[id].TimeOffsetMs += ms;
+                context.Reply($"[green][Defender][white] Grenade #{id} +{ms}ms → now at {wip.Grenades[id].TimeOffsetMs}ms");
+            }
+        }
+        else
+        {
+            context.Reply("[red][Defender][white] Invalid grenade ID. Use !nades to list.");
+        }
+    }
+
+    private void OnNadeSub(ICommandContext context)
+    {
+        var player = context.Sender;
+        if (player == null) return;
+        var wip = _recording.GetWipScenario();
+        if (wip == null || wip.Grenades.Count == 0)
+        {
+            context.Reply("[red][Defender][white] No grenades in the current scenario.");
+            return;
+        }
+
+        if (context.Args.Length < 2)
+        {
+            context.Reply("Usage: !nade- <id> <ms>. Example: !nade- 0 200");
+            return;
+        }
+
+        if (int.TryParse(context.Args[0], out int id) && id >= 0 && id < wip.Grenades.Count)
+        {
+            if (int.TryParse(context.Args[1], out int ms))
+            {
+                wip.Grenades[id].TimeOffsetMs -= ms;
+                if (wip.Grenades[id].TimeOffsetMs < 0) wip.Grenades[id].TimeOffsetMs = 0;
+                context.Reply($"[green][Defender][white] Grenade #{id} -{ms}ms → now at {wip.Grenades[id].TimeOffsetMs}ms");
+            }
+        }
+        else
+        {
+            context.Reply("[red][Defender][white] Invalid grenade ID. Use !nades to list.");
+        }
+    }
+
+    private void OnNadeSet(ICommandContext context)
+    {
+        var player = context.Sender;
+        if (player == null) return;
+        var wip = _recording.GetWipScenario();
+        if (wip == null || wip.Grenades.Count == 0)
+        {
+            context.Reply("[red][Defender][white] No grenades in the current scenario.");
+            return;
+        }
+
+        if (context.Args.Length < 2)
+        {
+            context.Reply("Usage: !nade <id> <ms>. Example: !nade 0 1500");
+            return;
+        }
+
+        if (int.TryParse(context.Args[0], out int id) && id >= 0 && id < wip.Grenades.Count)
+        {
+            if (int.TryParse(context.Args[1], out int ms))
+            {
+                if (ms < 0) ms = 0;
+                wip.Grenades[id].TimeOffsetMs = ms;
+                context.Reply($"[green][Defender][white] Grenade #{id} delay set to {wip.Grenades[id].TimeOffsetMs}ms");
+            }
+        }
+        else
+        {
+            context.Reply("[red][Defender][white] Invalid grenade ID. Use !nades to list.");
+        }
+    }
+
+    private void OnGiveAk(ICommandContext context)
+    {
+        var player = context.Sender;
+        if (player == null) return;
+        if (player.PlayerPawn?.ItemServices != null)
+        {
+            player.PlayerPawn.ItemServices.GiveItem<SwiftlyS2.Shared.SchemaDefinitions.CBasePlayerWeapon>("weapon_ak47");
+            context.Reply("[green][Defender][white] Granted AK-47.");
+        }
     }
 }

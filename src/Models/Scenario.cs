@@ -7,6 +7,7 @@ public sealed class Scenario
     public string Name { get; set; } = string.Empty;
     public string MapName { get; set; } = string.Empty;
     public ScenarioAnchor Anchor { get; set; } = new();
+    public ScenarioAnchor PlayerAnchor { get; set; } = new();
     public List<string> PlayerLoadout { get; set; } = new();
     public List<ScenarioBot> Bots { get; set; } = new();
     public List<ScenarioGrenade> Grenades { get; set; } = new();

@@ -1,0 +1,38 @@
+name: Build Check
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: "10.0.x"
+        
+    - name: Restore dependencies
+      run: dotnet restore SwiftlyS2_Defender.csproj
+      
+    - name: Build and Package
+      run: |
+        dotnet publish SwiftlyS2_Defender.csproj -c Release -o output/SwiftlyS2-Defender
+        
+        # Create a zip containing the SwiftlyS2-Defender folder for easy installation
+        cd output
+        zip -r ../SwiftlyS2-Defender-latest.zip SwiftlyS2-Defender/
+        cd ..
+        
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SwiftlyS2-Defender-latest
+        path: SwiftlyS2-Defender-latest.zip

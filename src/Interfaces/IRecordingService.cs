@@ -6,7 +6,7 @@ public interface IRecordingService
 {
     bool IsRecordingGrenade { get; }
     void SetupScenario(string name);
-    void SetPlayerAnchor(ulong steamId);
+    void SetPlayerDefendAnchor(ulong steamId);
     void StartRecordingBot(ulong steamId);
     void StartRecordingGrenade(ulong steamId, string grenadeType);
     void LogProjectileSpawned(string designerName, SwiftlyS2.Shared.Natives.Vector origin, SwiftlyS2.Shared.Natives.Vector velocity);

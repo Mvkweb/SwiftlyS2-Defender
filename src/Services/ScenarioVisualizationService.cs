@@ -25,12 +25,12 @@ public sealed class ScenarioVisualizationService : IScenarioVisualizationService
     {
         ClearVisualizations();
 
-        // Draw Anchor
-        if (scenario.Anchor != null)
+        // Draw Player Anchor
+        if (scenario.PlayerAnchor != null && scenario.PlayerAnchor.IsSet)
         {
-            var anchorPos = new Vector(scenario.Anchor.X, scenario.Anchor.Y, scenario.Anchor.Z);
-            CreateBeam(anchorPos, new Color(0, 255, 0, 255)); // Green for anchor
-            CreateText(new Vector(anchorPos.X, anchorPos.Y, anchorPos.Z + 70.0f), "Anchor");
+            var playerPos = new Vector(scenario.PlayerAnchor.X, scenario.PlayerAnchor.Y, scenario.PlayerAnchor.Z);
+            CreateBeam(playerPos, new Color(255, 0, 255, 255)); // Purple for player anchor
+            CreateText(new Vector(playerPos.X, playerPos.Y, playerPos.Z + 70.0f), "Player Anchor");
         }
 
         // Draw Bots

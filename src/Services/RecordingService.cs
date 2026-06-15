@@ -50,7 +50,7 @@ public sealed class RecordingService : IRecordingService
         _logger.LogInformation("Creating new scenario: {Name}", name);
     }
 
-    public void SetPlayerAnchor(ulong steamId)
+    public void SetPlayerDefendAnchor(ulong steamId)
     {
         if (_wipScenario == null) return;
         var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
@@ -61,7 +61,7 @@ public sealed class RecordingService : IRecordingService
 
         if (origin == null) return;
 
-        _wipScenario.Anchor = new ScenarioAnchor
+        _wipScenario.PlayerAnchor = new ScenarioAnchor
         {
             X = origin.Value.X,
             Y = origin.Value.Y,
@@ -89,12 +89,30 @@ public sealed class RecordingService : IRecordingService
     public void StartRecordingBot(ulong steamId)
     {
         if (_wipScenario == null) return;
+
+        var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+        if (player == null || !player.IsValid || player.PlayerPawn == null) return;
+
+        var origin = player.PlayerPawn.CBodyComponent?.SceneNode?.AbsOrigin;
+        var viewAngles = player.PlayerPawn.EyeAngles;
+
+        if (origin != null && !_wipScenario.Anchor.IsSet)
+        {
+            _wipScenario.Anchor = new ScenarioAnchor
+            {
+                X = origin.Value.X,
+                Y = origin.Value.Y,
+                Z = origin.Value.Z,
+                Pitch = viewAngles.X,
+                Yaw = viewAngles.Y
+            };
+        }
+
         _recordingPlayerId = steamId;
         _activeBot = new ScenarioBot();
         _isCountingDown = true;
         _state.SetRecordingState(true);
 
-        var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
         if (player != null)
         {
             _core.Scheduler.DelayBySeconds(1.0f, () => player.SendMessage(MessageType.Chat, "3..."));
@@ -107,14 +125,32 @@ public sealed class RecordingService : IRecordingService
                 _recordingStartTimeMs = Environment.TickCount64;
                 _lastMoveTimeMs = _recordingStartTimeMs;
                 _lastPlayerPos = null;
-                _playback.PlayScenario(_wipScenario, false); 
             });
         }
     }
 
     public void StartRecordingGrenade(ulong steamId, string grenadeType)
     {
-        if (_wipScenario == null || !_wipScenario.Anchor.IsSet) return;
+        if (_wipScenario == null) return;
+
+        var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
+        if (player != null && player.IsValid && player.PlayerPawn != null)
+        {
+            var origin = player.PlayerPawn.CBodyComponent?.SceneNode?.AbsOrigin;
+            var viewAngles = player.PlayerPawn.EyeAngles;
+
+            if (origin != null && !_wipScenario.Anchor.IsSet)
+            {
+                _wipScenario.Anchor = new ScenarioAnchor
+                {
+                    X = origin.Value.X,
+                    Y = origin.Value.Y,
+                    Z = origin.Value.Z,
+                    Pitch = viewAngles.X,
+                    Yaw = viewAngles.Y
+                };
+            }
+        }
         _state.SetRecordingState(true);
         _isRecordingGrenade = true;
         _recordingStartTimeMs = Environment.TickCount64;
@@ -131,10 +167,10 @@ public sealed class RecordingService : IRecordingService
         if (!_state.IsRecording || _activeBot == null || _wipScenario == null) return;
         
         long timeOffset;
-        if (_isRecordingGrenade && _activeBot.Frames.Count == 0)
-            timeOffset = Environment.TickCount64 - _recordingStartTimeMs;
+        if (_isRecordingGrenade)
+            timeOffset = 0; // Independent grenade throws always start at 0ms delay
         else
-            timeOffset = _activeBot.Frames.Count > 0 ? _activeBot.Frames.Last().TimeOffsetMs : Environment.TickCount64 - _recordingStartTimeMs;
+            timeOffset = _activeBot.Frames.Count > 0 ? _activeBot.Frames.Last().TimeOffsetMs : 0;
         
         _wipScenario.Grenades.Add(new ScenarioGrenade
         {

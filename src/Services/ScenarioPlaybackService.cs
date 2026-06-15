@@ -33,7 +33,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _core.Event.OnTick += OnTick;
     }
 
-    public void PlayScenario(Scenario scenario, bool teleportHumans = true)
+    public void PlayScenario(Scenario scenario, bool teleportHumans = true, ulong? testingPlayerId = null)
     {
         _playingScenario = scenario;
         _botAssignments.Clear();
@@ -42,20 +42,25 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _playbackStartTimeMs = Environment.TickCount64;
         _state.SetPlayingState(true);
 
-        var bots = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && PlayerUtil.IsBot(p)).ToList();
-        int totalBotsNeeded = scenario.Bots.Count;
-        int currentBots = bots.Count;
+        _logger.LogInformation("PlayScenario: Need {totalBots} bots, currently have {currentBots}. Spawning...", scenario.Bots.Count, _core.PlayerManager.GetAllPlayers().Count(p => PlayerUtil.IsBot(p)));
 
-        var humans = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && !PlayerUtil.IsBot(p)).ToList();
-        var human = humans.FirstOrDefault();
-        string botCmd = "bot_add_t";
-        if (human != null && human.Controller != null && human.Controller.TeamNum == 2) // 2 is Terrorist
-        {
-            botCmd = "bot_add_ct";
-        }
+        int totalBotsNeeded = scenario.Bots.Count;
+        if (scenario.Grenades.Count > 0 && totalBotsNeeded == 0) totalBotsNeeded = 1; // Need at least 1 bot to throw grenades
         
-        _logger.LogInformation("PlayScenario: Need {total} bots, currently have {current}. Spawning...", 
-            totalBotsNeeded, currentBots);
+        var bots = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && PlayerUtil.IsBot(p)).ToList();
+        int currentBots = bots.Count;
+        
+        // Spawn bots if we don't have enough
+        string botCmd = "bot_add_t";
+        if (testingPlayerId != null)
+        {
+            var testingPlayer = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == testingPlayerId.Value);
+            if (testingPlayer != null && testingPlayer.Controller != null && testingPlayer.Controller.TeamNum == 2)
+            {
+                botCmd = "bot_add_ct"; // If player is T, bots should be CT
+            }
+        }
+        else if (scenario.MapName != null) { /* we could choose team based on map logic if no player */ }
 
         if (currentBots < totalBotsNeeded)
         {
@@ -65,7 +70,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
             }
         }
 
-        ResetToStart(teleportHumans);
+        ResetToStart(teleportHumans, testingPlayerId);
     }
 
     public void StopScenario()
@@ -76,19 +81,28 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _state.SetPlayingState(false);
     }
 
-    public void ResetToStart(bool teleportHumans = true)
+    public void ResetToStart(bool teleportHumans = true, ulong? testingPlayerId = null)
     {
         if (_playingScenario == null) return;
         _playbackStartTimeMs = Environment.TickCount64;
 
         if (teleportHumans)
         {
-            // Teleport player
+            // Teleport testing player(s)
             var humans = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && !PlayerUtil.IsBot(p)).ToList();
+            if (testingPlayerId != null)
+            {
+                humans = humans.Where(p => p.SteamID == testingPlayerId.Value).ToList();
+            }
             foreach (var p in humans)
             {
-                var position = new Vector(_playingScenario.Anchor.X, _playingScenario.Anchor.Y, _playingScenario.Anchor.Z + 2.0f);
-                var viewAngles = new QAngle(_playingScenario.Anchor.Pitch, _playingScenario.Anchor.Yaw, 0);
+                if (_playingScenario.PlayerAnchor.IsSet)
+                {
+                    var position = new Vector(_playingScenario.PlayerAnchor.X, _playingScenario.PlayerAnchor.Y, _playingScenario.PlayerAnchor.Z + 10.0f);
+                    // Set pitch to 0 to prevent the entire player model from tilting forward (Teleport rotates the base entity, not just the eyes!)
+                    var viewAngles = new QAngle(0, _playingScenario.PlayerAnchor.Yaw, 0);
+                    p.PlayerPawn?.Teleport(position, viewAngles, new Vector(0, 0, -100));
+                }
 
                 // Strip existing weapons and equip saved loadout
                 if (p.PlayerPawn?.WeaponServices != null && p.PlayerPawn?.ItemServices != null)
@@ -110,8 +124,6 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                         }
                     }
                 }
-
-                p.PlayerPawn?.Teleport(position, viewAngles, Vector.Zero);
             }
         }
 
@@ -216,7 +228,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                 {
                     var throwerBotPawn = _botAssignments.Count > 0 
                         ? _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.Slot == _botAssignments.Keys.First())?.PlayerPawn 
-                        : null;
+                        : _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.IsValid && PlayerUtil.IsBot(p))?.PlayerPawn;
 
                     if (grenade.GrenadeType == "flashbang_projectile")
                     {

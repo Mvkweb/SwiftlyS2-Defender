@@ -65,13 +65,18 @@ public sealed class GameplayEventHandlers
             // Fast instant respawn exactly where they died
             if (deathPos != null && deathAngles != null && !victim.IsFakeClient && _core != null)
             {
-                // Delay by 0.1s to ensure engine fully processes death and physics settle
+                // Delay by 0.1s to ensure engine fully processes death and team changes
                 _core.Scheduler.DelayBySeconds(0.1f, () => 
                 {
-                    if (victim.IsValid)
+                    // Check TeamNum HERE, after the delay, to ensure they didn't just join Spectator (Team 1)
+                    if (victim.IsValid && victim.Controller != null && (victim.Controller.TeamNum == 2 || victim.Controller.TeamNum == 3))
                     {
                         victim.Respawn();
-                        victim.PlayerPawn?.Teleport(deathPos.Value, deathAngles.Value, new Vector(0,0,0));
+                        // Add +10 to Z to prevent spawning inside the floor or death ragdolls
+                        var safePos = new Vector(deathPos.Value.X, deathPos.Value.Y, deathPos.Value.Z + 10.0f);
+                        // Zero out pitch to prevent the player model from tilting forward into the floor
+                        var safeAngles = new QAngle(0, deathAngles.Value.Y, 0);
+                        victim.PlayerPawn?.Teleport(safePos, safeAngles, new Vector(0, 0, -100));
                     }
                 });
             }
