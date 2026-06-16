@@ -21,6 +21,7 @@ public sealed class GameplayEventHandlers
     private Guid _playerHurtHook;
     private Guid _roundStartHook;
     private Guid _playerSpawnHook;
+    private Guid _playerDisconnectHook;
     private Guid _decalHook;
     private readonly HashSet<ulong> _welcomedPlayers = new();
 
@@ -38,6 +39,7 @@ public sealed class GameplayEventHandlers
         _playerHurtHook = core.GameEvent.HookPost<EventPlayerHurt>(OnPlayerHurt);
         _roundStartHook = core.GameEvent.HookPost<EventRoundStart>(OnRoundStart);
         _playerSpawnHook = core.GameEvent.HookPost<EventPlayerSpawn>(OnPlayerSpawn);
+        _playerDisconnectHook = core.GameEvent.HookPost<EventPlayerDisconnect>(OnPlayerDisconnect);
         _decalHook = core.NetMessage.HookServerMessage<SwiftlyS2.Shared.ProtobufDefinitions.CMsgPlaceDecalEvent>(OnPlaceDecal);
         core.Event.OnEntityCreated += OnEntityCreated;
     }
@@ -48,8 +50,26 @@ public sealed class GameplayEventHandlers
         if (_playerHurtHook != Guid.Empty) core.GameEvent.Unhook(_playerHurtHook);
         if (_roundStartHook != Guid.Empty) core.GameEvent.Unhook(_roundStartHook);
         if (_playerSpawnHook != Guid.Empty) core.GameEvent.Unhook(_playerSpawnHook);
+        if (_playerDisconnectHook != Guid.Empty) core.GameEvent.Unhook(_playerDisconnectHook);
         if (_decalHook != Guid.Empty) core.NetMessage.Unhook(_decalHook);
         core.Event.OnEntityCreated -= OnEntityCreated;
+    }
+
+    private HookResult OnPlayerDisconnect(EventPlayerDisconnect @event)
+    {
+        var player = @event.UserIdPlayer;
+        if (player == null || player.IsFakeClient) return HookResult.Continue;
+
+        if (_state.IsPlaying)
+        {
+            _roundManager.StopAndClean();
+        }
+        else if (_state.IsRecording)
+        {
+            _recording.StopRecording(player.SteamID);
+        }
+
+        return HookResult.Continue;
     }
 
     private HookResult OnPlayerDeath(EventPlayerDeath @event)
@@ -104,15 +124,7 @@ public sealed class GameplayEventHandlers
             return;
         }
 
-        // --- SWIFTLYCHAN DEBUG ---
-        if (initName.Contains("sound") || initName.Contains("snd_event"))
-        {
-            if (_core != null)
-            {
-                _core.Logger.LogInformation("[Defender-Debug] Sound entity spawned: {name} | index: {h}", initName, entity.Index);
-            }
-        }
-        // -------------------------
+
 
         if (!_recording.IsRecordingGrenade) return;
 
