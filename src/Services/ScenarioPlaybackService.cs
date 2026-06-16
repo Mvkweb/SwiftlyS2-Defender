@@ -320,6 +320,9 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
     {
         string[] grenadeClasses = { 
             "molotov_projectile", 
+            "firebomb_projectile",
+            "incgrenade_projectile",
+            "incendiary_projectile",
             "hegrenade_projectile", 
             "flashbang_projectile", 
             "smokegrenade_projectile", 
@@ -348,7 +351,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         }
         catch (Exception ex)
         {
-            _logger.LogError($"[Defender-Debug-Cleanup] Grenade error: {ex.Message}");
+            // Ignore
         }
 
         // Delay fire cleanup by 0.1s to catch mid-air detonations

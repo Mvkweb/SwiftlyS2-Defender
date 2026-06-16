@@ -81,7 +81,16 @@ public sealed class RoundManagerService : IRoundManagerService
     public void StopAndClean()
     {
         _playback.StopScenario();
-        _core.Scheduler.DelayBySeconds(2.0f, () => 
+        
+        foreach (var player in _core.PlayerManager.GetAllPlayers())
+        {
+            if (player != null && player.PlayerPawn != null && player.PlayerPawn.IsValid)
+            {
+                player.PlayerPawn.AcceptInput<string>("StopSound", "", null, null, 0);
+            }
+        }
+
+        _core.Scheduler.DelayBySeconds(0.1f, () => 
         {
             _core.Engine.ExecuteCommand("bot_kick");
             _core.Engine.ExecuteCommand("bot_quota 0");
