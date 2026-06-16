@@ -50,7 +50,7 @@ public sealed class MenuHudService : IMenuHudService
         if (timeLeft > 0)
         {
             // Set duration to 1000 milliseconds (1 second) so it properly stays on screen for the countdown
-            player.SendCenterHTML($"<font class='fontSize-l'>{timeLeft}</font>", 1000);
+            player.SendCenterHTML($"{timeLeft}", 1000);
             _core.Scheduler.DelayBySeconds(1f, () => ShowCountdownStep(player, timeLeft - 1, startCallback));
         }
         else
