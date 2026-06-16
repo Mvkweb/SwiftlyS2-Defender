@@ -35,15 +35,41 @@ public class SwiftlyS2_Defender : BasePlugin
         var config = _serviceProvider.GetRequiredService<IDefenderConfigService>();
         var playback = _serviceProvider.GetRequiredService<IScenarioPlaybackService>();
         var vis = _serviceProvider.GetRequiredService<IScenarioVisualizationService>();
+        var hud = _serviceProvider.GetRequiredService<IMenuHudService>();
 
-        _commandHandlers = new CommandHandlers(state, config, recording, playback, vis);
+        hud.Register(Core);
+
+        _commandHandlers = new CommandHandlers(state, config, recording, playback, vis, hud, roundManager);
         _commandHandlers.Register(Core);
 
         config.LoadOrCreate();
 
+        /* TEMPORARY: Revert back to real warmup if fake warmup is broken
         Core.Engine.ExecuteCommand("mp_warmuptime 999999");
         Core.Engine.ExecuteCommand("mp_warmup_pausetimer 1");
         Core.Engine.ExecuteCommand("mp_warmup_start");
+        */
+
+        // FAKE WARMUP
+        Core.Engine.ExecuteCommand("mp_warmup_end");
+        Core.Engine.ExecuteCommand("mp_ignore_round_win_conditions 1"); // Rounds never end
+        Core.Engine.ExecuteCommand("mp_roundtime 60");
+        Core.Engine.ExecuteCommand("mp_freezetime 0");
+        Core.Engine.ExecuteCommand("mp_buytime 9999");
+        Core.Engine.ExecuteCommand("mp_buy_anywhere 1");
+        Core.Engine.ExecuteCommand("mp_maxmoney 65535");
+        Core.Engine.ExecuteCommand("mp_startmoney 65535");
+        Core.Engine.ExecuteCommand("sv_infinite_ammo 2"); // Infinite ammo without reloading bypassing
+        Core.Engine.ExecuteCommand("mp_give_player_c4 0"); // Prevent T side from spawning with C4
+        Core.Engine.ExecuteCommand("mp_buy_allow_grenades 0"); // Prevent players from buying extra grenades
+        Core.Engine.ExecuteCommand("mp_playercashawards 0"); // Disables all player cash award chat messages
+        Core.Engine.ExecuteCommand("mp_teamcashawards 0"); // Disables all team cash award chat messages
+        Core.Engine.ExecuteCommand("cash_player_killed_enemy_default 0"); // Backup: No money for kills
+        Core.Engine.ExecuteCommand("cash_player_killed_enemy_factor 0");
+        Core.Engine.ExecuteCommand("cash_team_per_dead_enemy 0");
+        Core.Engine.ExecuteCommand("mp_respawn_on_death_t 1"); // Enable standard respawns just in case
+        Core.Engine.ExecuteCommand("mp_respawn_on_death_ct 1");
+        Core.Engine.ExecuteCommand("mp_restartgame 1");
         Core.Engine.ExecuteCommand("bot_join_team T");
         Core.Engine.ExecuteCommand("bot_kick");
 
@@ -59,6 +85,9 @@ public class SwiftlyS2_Defender : BasePlugin
     {
         _gameplayEventHandlers?.Unregister(Core);
         _commandHandlers?.Unregister(Core);
+
+        var hud = _serviceProvider?.GetService<IMenuHudService>();
+        hud?.Unregister(Core);
 
         ServiceProviderFactory.DisposeServiceProvider(_serviceProvider);
         _serviceProvider = null;

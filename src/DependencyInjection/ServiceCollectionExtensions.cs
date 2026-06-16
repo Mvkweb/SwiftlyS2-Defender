@@ -17,6 +17,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IScenarioPlaybackService, ScenarioPlaybackService>();
         services.AddSingleton<IRoundManagerService, RoundManagerService>();
         services.AddSingleton<IScenarioVisualizationService, ScenarioVisualizationService>();
+        services.AddSingleton<IMenuHudService, MenuHudService>();
 
         return services;
     }

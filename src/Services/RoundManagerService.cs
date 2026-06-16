@@ -78,11 +78,14 @@ public sealed class RoundManagerService : IRoundManagerService
         StopAndClean();
     }
 
-    private void StopAndClean()
+    public void StopAndClean()
     {
         _playback.StopScenario();
-        _core.Engine.ExecuteCommand("bot_kick");
-        _core.Engine.ExecuteCommand("bot_quota 0");
+        _core.Scheduler.DelayBySeconds(0.1f, () => 
+        {
+            _core.Engine.ExecuteCommand("bot_kick");
+            _core.Engine.ExecuteCommand("bot_quota 0");
+        });
         
         // Clean up entities (Weapons/Items are cleaned up automatically by the engine or playback service, avoid ent_fire since it triggers cheat protection)
         

@@ -6,4 +6,5 @@ public interface IRoundManagerService
     void HandlePlayerHurt(int victimSlot, int attackerSlot, int damage);
     void ForceFail();
     void ForceSuccess();
+    void StopAndClean();
 }

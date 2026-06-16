@@ -224,7 +224,6 @@ public sealed class RecordingService : IRecordingService
         _isRecordingGrenade = false;
         
         _state.SetRecordingState(false);
-        _playback.StopScenario();
         _core.Engine.ExecuteCommand("bot_kick");
         _core.Engine.ExecuteCommand("bot_quota 0");
         

@@ -104,6 +104,16 @@ public sealed class GameplayEventHandlers
             return;
         }
 
+        // --- SWIFTLYCHAN DEBUG ---
+        if (initName.Contains("sound") || initName.Contains("snd_event"))
+        {
+            if (_core != null)
+            {
+                _core.Logger.LogInformation("[Defender-Debug] Sound entity spawned: {name} | index: {h}", initName, entity.Index);
+            }
+        }
+        // -------------------------
+
         if (!_recording.IsRecordingGrenade) return;
 
         if (_core != null)
@@ -170,9 +180,23 @@ public sealed class GameplayEventHandlers
     {
         if (_core == null) return HookResult.Continue;
         
-        // Enforce Defender Gamemode (Infinite Warmup, no standard bots)
-        _core.Engine.ExecuteCommand("mp_warmuptime 999999");
-        _core.Engine.ExecuteCommand("mp_warmup_pausetimer 1");
+        // Enforce Defender Gamemode (Fake Warmup, no standard bots)
+        _core.Engine.ExecuteCommand("mp_warmup_end");
+        _core.Engine.ExecuteCommand("mp_ignore_round_win_conditions 1"); // Rounds never end
+        _core.Engine.ExecuteCommand("mp_roundtime 60");
+        _core.Engine.ExecuteCommand("mp_freezetime 0");
+        _core.Engine.ExecuteCommand("mp_buytime 9999");
+        _core.Engine.ExecuteCommand("mp_buy_anywhere 1");
+        _core.Engine.ExecuteCommand("mp_maxmoney 65535");
+        _core.Engine.ExecuteCommand("mp_startmoney 65535");
+        _core.Engine.ExecuteCommand("sv_infinite_ammo 2");
+        _core.Engine.ExecuteCommand("mp_give_player_c4 0"); // Prevent T side from spawning with C4
+        _core.Engine.ExecuteCommand("mp_buy_allow_grenades 0"); // Prevent players from buying extra grenades
+        _core.Engine.ExecuteCommand("mp_playercashawards 0"); // Disables all player cash award chat messages
+        _core.Engine.ExecuteCommand("mp_teamcashawards 0"); // Disables all team cash award chat messages
+        _core.Engine.ExecuteCommand("cash_player_killed_enemy_default 0"); // Backup: No money for kills
+        _core.Engine.ExecuteCommand("cash_player_killed_enemy_factor 0");
+        _core.Engine.ExecuteCommand("cash_team_per_dead_enemy 0");
         _core.Engine.ExecuteCommand("mp_autoteambalance 0");
         _core.Engine.ExecuteCommand("mp_limitteams 0");
         _core.Engine.ExecuteCommand("mp_respawn_on_death_t 1");

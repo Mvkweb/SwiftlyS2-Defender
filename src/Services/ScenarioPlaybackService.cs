@@ -17,6 +17,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
     private readonly ISwiftlyCore _core;
     private readonly ILogger _logger;
     private readonly IDefenderStateService _state;
+    private readonly IMenuHudService _hud;
 
     private bool _isPlaying = false;
     private long _playbackStartTimeMs;
@@ -24,16 +25,17 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
     private readonly Dictionary<int, ScenarioBot> _botAssignments = new();
     private readonly HashSet<ScenarioGrenade> _thrownGrenades = new();
 
-    public ScenarioPlaybackService(ISwiftlyCore core, ILogger logger, IDefenderStateService state)
+    public ScenarioPlaybackService(ISwiftlyCore core, ILogger logger, IDefenderStateService state, IMenuHudService hud)
     {
         _core = core;
         _logger = logger;
         _state = state;
+        _hud = hud;
 
         _core.Event.OnTick += OnTick;
     }
 
-    public void PlayScenario(Scenario scenario, bool teleportHumans = true, ulong? testingPlayerId = null)
+    public void PrepareScenario(Scenario scenario, bool teleportHumans, ulong? testingPlayerId, Action onReady)
     {
         _playingScenario = scenario;
         _botAssignments.Clear();
@@ -44,11 +46,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _core.Engine.ExecuteCommand("ent_fire molotov_projectile kill");
         _core.Engine.ExecuteCommand("ent_fire hegrenade_projectile kill");
 
-        _isPlaying = true;
-        _playbackStartTimeMs = Environment.TickCount64;
-        _state.SetPlayingState(true);
-
-        _logger.LogInformation("PlayScenario: Need {totalBots} bots, currently have {currentBots}. Spawning...", scenario.Bots.Count, _core.PlayerManager.GetAllPlayers().Count(p => PlayerUtil.IsBot(p)));
+        _logger.LogInformation("PrepareScenario: Need {totalBots} bots, currently have {currentBots}. Spawning...", scenario.Bots.Count, _core.PlayerManager.GetAllPlayers().Count(p => PlayerUtil.IsBot(p)));
 
         int totalBotsNeeded = scenario.Bots.Count;
         if (scenario.Grenades.Count > 0 && totalBotsNeeded == 0) totalBotsNeeded = 1; // Need at least 1 bot to throw grenades
@@ -76,7 +74,43 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
             }
         }
 
-        ResetToStart(teleportHumans, testingPlayerId);
+        WaitUntilBotsReady(totalBotsNeeded, teleportHumans, testingPlayerId, onReady);
+    }
+
+    private void WaitUntilBotsReady(int requiredBots, bool teleportHumans, ulong? testingPlayerId, Action onReady)
+    {
+        var bots = _core.PlayerManager.GetAllPlayers().Where(p => p.IsValid && PlayerUtil.IsBot(p) && p.PlayerPawn != null && p.Controller != null && p.Controller.PawnIsAlive).ToList();
+        if (bots.Count >= requiredBots)
+        {
+            ResetToStart(teleportHumans, testingPlayerId);
+            onReady();
+        }
+        else
+        {
+            _core.Scheduler.DelayBySeconds(0.1f, () => WaitUntilBotsReady(requiredBots, teleportHumans, testingPlayerId, onReady));
+        }
+    }
+
+    public void PlayScenario(Scenario scenario, bool teleportHumans = true, ulong? testingPlayerId = null)
+    {
+        _isPlaying = true;
+        _playbackStartTimeMs = Environment.TickCount64;
+        _state.SetPlayingState(true);
+
+        // Show HUD
+        if (testingPlayerId != null)
+        {
+            var p = _core.PlayerManager.GetAllPlayers().FirstOrDefault(x => x.SteamID == testingPlayerId.Value);
+            if (p != null) _hud.ShowActiveScenarioHud(p, scenario);
+        }
+        else
+        {
+            // Or show to everyone if testingPlayerId is null
+            foreach (var p in _core.PlayerManager.GetAllPlayers().Where(x => !PlayerUtil.IsBot(x)))
+            {
+                _hud.ShowActiveScenarioHud(p, scenario);
+            }
+        }
     }
 
     public void StopScenario()
@@ -85,6 +119,12 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
         _playingScenario = null;
         _botAssignments.Clear();
         _state.SetPlayingState(false);
+
+        // Close HUD for everyone
+        foreach (var p in _core.PlayerManager.GetAllPlayers().Where(x => !PlayerUtil.IsBot(x)))
+        {
+            _hud.CloseHud(p);
+        }
 
         ClearActiveGrenades();
     }
@@ -241,7 +281,6 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
                 var pos = new Vector(grenade.OriginX, grenade.OriginY, grenade.OriginZ);
                 var vel = new Vector(grenade.VelocityX, grenade.VelocityY, grenade.VelocityZ);
                 var ang = SwiftlyS2.Shared.Natives.QAngle.Zero;
-
                 try
                 {
                     var throwerBotPawn = _botAssignments.Count > 0
@@ -284,7 +323,7 @@ public sealed class ScenarioPlaybackService : IScenarioPlaybackService
             "hegrenade_projectile", 
             "flashbang_projectile", 
             "smokegrenade_projectile", 
-            "decoy_projectile" 
+            "decoy_projectile"
         };
 
         try

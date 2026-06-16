@@ -12,20 +12,27 @@ public sealed class CommandHandlers
     private readonly IRecordingService _recording;
     private readonly IScenarioPlaybackService _playback;
     private readonly IScenarioVisualizationService _vis;
+    private readonly IMenuHudService _hud;
+    private readonly IRoundManagerService _roundManager;
     private readonly List<Guid> _commandGuids = new();
+    private bool _isStarting = false;
 
     public CommandHandlers(
         IDefenderStateService state, 
         IDefenderConfigService config, 
         IRecordingService recording, 
         IScenarioPlaybackService playback,
-        IScenarioVisualizationService vis)
+        IScenarioVisualizationService vis,
+        IMenuHudService hud,
+        IRoundManagerService roundManager)
     {
         _state = state;
         _config = config;
         _recording = recording;
         _playback = playback;
         _vis = vis;
+        _hud = hud;
+        _roundManager = roundManager;
     }
 
     private ISwiftlyCore? _core;
@@ -128,8 +135,18 @@ public sealed class CommandHandlers
     {
         var player = context.Sender;
         if (player == null) return;
-        _recording.StopRecording(player.SteamID);
-        context.Reply("[green][Defender][default] Recording stopped and saved.");
+
+        if (_state.IsPlaying || _isStarting)
+        {
+            _isStarting = false;
+            _roundManager.StopAndClean();
+            context.Reply("[green][Defender][default] Stopped practicing scenario.");
+        }
+        else
+        {
+            _recording.StopRecording(player.SteamID);
+            context.Reply("[green][Defender][default] Stopped recording.");
+        }
     }
 
     private void OnClearLast(ICommandContext context)
@@ -150,6 +167,12 @@ public sealed class CommandHandlers
 
     private void OnTestScenario(ICommandContext context)
     {
+        if (_state.IsPlaying || _isStarting)
+        {
+            context.Reply("[red][Defender][white] A scenario is already playing or starting! Type !stop first or wait for it to finish.");
+            return;
+        }
+
         var player = context.Sender;
         if (player == null) return;
 
@@ -183,8 +206,16 @@ public sealed class CommandHandlers
                     }
 
                     _vis.ClearVisualizations();
-                    _playback.PlayScenario(loaded, true, player.SteamID);
-                    context.Reply($"[green][Defender][default] Testing scenario: {nameToLoad}...");
+                    _isStarting = true;
+                    _playback.PrepareScenario(loaded, true, player.SteamID, () => 
+                    {
+                        _hud.StartCountdownAndPlay(player, loaded, player.SteamID, () => 
+                        {
+                            _isStarting = false;
+                            _playback.PlayScenario(loaded, true, player.SteamID);
+                        });
+                    });
+                    context.Reply($"[green][Defender][default] Starting test scenario: {nameToLoad}...");
                     return;
                 }
             }
@@ -216,8 +247,16 @@ public sealed class CommandHandlers
             }
 
             _vis.ClearVisualizations();
-            _playback.PlayScenario(scenario, true, player.SteamID);
-            context.Reply("[green][Defender][default] Testing active scenario...");
+            _isStarting = true;
+            _playback.PrepareScenario(scenario, true, player.SteamID, () => 
+            {
+                _hud.StartCountdownAndPlay(player, scenario, player.SteamID, () => 
+                {
+                    _isStarting = false;
+                    _playback.PlayScenario(scenario, true, player.SteamID);
+                });
+                context.Reply($"[green][Defender][default] Starting practice scenario: {scenario.Name}...");
+            });
         }
         else
         {
@@ -239,6 +278,12 @@ public sealed class CommandHandlers
 
     private void OnPracScenario(ICommandContext context)
     {
+        if (_state.IsPlaying || _isStarting)
+        {
+            context.Reply("[red][Defender][white] A scenario is already playing or starting! Type !stop first or wait for it to finish.");
+            return;
+        }
+
         var player = context.Sender;
         if (player == null) return;
         
@@ -253,8 +298,16 @@ public sealed class CommandHandlers
                 if (loaded != null)
                 {
                     _vis.ClearVisualizations();
-                    _playback.PlayScenario(loaded, true, player.SteamID);
-                    context.Reply($"[green][Defender][default] Playing scenario: {nameToLoad}...");
+                    _isStarting = true;
+                    _playback.PrepareScenario(loaded, true, player.SteamID, () => 
+                    {
+                        _hud.StartCountdownAndPlay(player, loaded, player.SteamID, () => 
+                        {
+                            _isStarting = false;
+                            _playback.PlayScenario(loaded, true, player.SteamID);
+                        });
+                    });
+                    context.Reply($"[green][Defender][default] Starting practice scenario: {nameToLoad}...");
                     return;
                 }
             }
@@ -265,8 +318,16 @@ public sealed class CommandHandlers
                 if (scenario != null)
                 {
                     _vis.ClearVisualizations();
-                    _playback.PlayScenario(scenario, true, player.SteamID);
-                    context.Reply($"[green][Defender][default] Playing scenario: {name}...");
+                    _isStarting = true;
+                    _playback.PrepareScenario(scenario, true, player.SteamID, () => 
+                    {
+                        _hud.StartCountdownAndPlay(player, scenario, player.SteamID, () => 
+                        {
+                            _isStarting = false;
+                            _playback.PlayScenario(scenario, true, player.SteamID);
+                        });
+                    });
+                    context.Reply("[green][Defender][default] Starting active practice scenario...");
                     return;
                 }
             }
