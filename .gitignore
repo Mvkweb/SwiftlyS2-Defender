@@ -21,3 +21,5 @@ project.lock.json
 # Publish and Release
 release-package/
 build/
+
+AGENTS.md

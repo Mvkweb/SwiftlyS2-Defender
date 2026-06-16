@@ -81,7 +81,7 @@ public sealed class RoundManagerService : IRoundManagerService
     public void StopAndClean()
     {
         _playback.StopScenario();
-        _core.Scheduler.DelayBySeconds(0.1f, () => 
+        _core.Scheduler.DelayBySeconds(2.0f, () => 
         {
             _core.Engine.ExecuteCommand("bot_kick");
             _core.Engine.ExecuteCommand("bot_quota 0");

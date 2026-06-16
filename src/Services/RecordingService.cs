@@ -224,8 +224,11 @@ public sealed class RecordingService : IRecordingService
         _isRecordingGrenade = false;
         
         _state.SetRecordingState(false);
-        _core.Engine.ExecuteCommand("bot_kick");
-        _core.Engine.ExecuteCommand("bot_quota 0");
+        _core.Scheduler.DelayBySeconds(2.0f, () => 
+        {
+            _core.Engine.ExecuteCommand("bot_kick");
+            _core.Engine.ExecuteCommand("bot_quota 0");
+        });
         
         var player = _core.PlayerManager.GetAllPlayers().FirstOrDefault(p => p.SteamID == steamId);
         if (player != null) player.SendMessage(MessageType.Chat, "Recording stopped and saved to scenario.");
